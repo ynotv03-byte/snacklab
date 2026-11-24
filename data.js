@@ -47,7 +47,7 @@ export const recipes = [
     "steps": [
       "Meng yoghurt, knoflook en peper. Serveer als dip."
     ],
-    "image": "./images/recipe-01.webp"
+    "image": "./recipe-01.webp"
   },
   {
     "id": 1,
@@ -97,7 +97,7 @@ export const recipes = [
     "steps": [
       "Meng yoghurt, mosterd en honing."
     ],
-    "image": "./images/recipe-02.webp"
+    "image": "./recipe-02.webp"
   },
   {
     "id": 2,
@@ -134,7 +134,7 @@ export const recipes = [
     "steps": [
       "Gebruik de roomkaas als dip."
     ],
-    "image": "./images/recipe-03.webp"
+    "image": "./recipe-03.webp"
   },
   {
     "id": 3,
@@ -171,7 +171,7 @@ export const recipes = [
     "steps": [
       "Snijd plakjes en besmeer."
     ],
-    "image": "./images/recipe-04.webp"
+    "image": "./recipe-04.webp"
   },
   {
     "id": 4,
@@ -214,7 +214,7 @@ export const recipes = [
     "steps": [
       "Besmeer plakjes en beleg met kip."
     ],
-    "image": "./images/recipe-05.webp"
+    "image": "./recipe-05.webp"
   },
   {
     "id": 5,
@@ -255,7 +255,7 @@ export const recipes = [
       "Snijd de banaan in plakjes.",
       "Verdeel de honing en kaneel over de plakjes."
     ],
-    "image": "./images/recipe-06.webp"
+    "image": "./recipe-06.webp"
   },
   {
     "id": 6,
@@ -298,7 +298,7 @@ export const recipes = [
     "steps": [
       "Meng kwark en whey, voeg mango toe."
     ],
-    "image": "./images/recipe-07.webp"
+    "image": "./recipe-07.webp"
   },
   {
     "id": 7,
@@ -341,7 +341,7 @@ export const recipes = [
     "steps": [
       "Meng kwark en whey als dip."
     ],
-    "image": "./images/recipe-08.webp"
+    "image": "./recipe-08.webp"
   },
   {
     "id": 8,
@@ -383,7 +383,7 @@ export const recipes = [
     "steps": [
       "Blend alles."
     ],
-    "image": "./images/recipe-09.webp"
+    "image": "./recipe-09.webp"
   },
   {
     "id": 9,
@@ -438,7 +438,7 @@ export const recipes = [
     "steps": [
       "Besmeer, beleg en rol op."
     ],
-    "image": "./images/recipe-10.webp"
+    "image": "./recipe-10.webp"
   },
   {
     "id": 10,
@@ -486,7 +486,7 @@ export const recipes = [
     "steps": [
       "Blend en koel."
     ],
-    "image": "./images/recipe-11.webp"
+    "image": "./recipe-11.webp"
   },
   {
     "id": 11,
@@ -528,7 +528,7 @@ export const recipes = [
     "steps": [
       "Blend alles."
     ],
-    "image": "./images/recipe-12.webp"
+    "image": "./recipe-12.webp"
   },
   {
     "id": 12,
@@ -571,7 +571,7 @@ export const recipes = [
     "steps": [
       "Prak banaan, meng met ei en whey, bak kleine pancakes."
     ],
-    "image": "./images/recipe-13.webp"
+    "image": "./recipe-13.webp"
   },
   {
     "id": 13,
@@ -614,7 +614,7 @@ export const recipes = [
     "steps": [
       "Blend tot mousse."
     ],
-    "image": "./images/recipe-14.webp"
+    "image": "./recipe-14.webp"
   },
   {
     "id": 14,
@@ -663,7 +663,7 @@ export const recipes = [
     "steps": [
       "Meng dip en serveer met appel."
     ],
-    "image": "./images/recipe-15.webp"
+    "image": "./recipe-15.webp"
   },
   {
     "id": 15,
@@ -731,7 +731,7 @@ export const recipes = [
     "steps": [
       "Meng saus, beleg en rol op."
     ],
-    "image": "./images/recipe-16.webp"
+    "image": "./recipe-16.webp"
   },
   {
     "id": 16,
@@ -787,7 +787,7 @@ export const recipes = [
     "steps": [
       "Prak avocado en beleg met ei en spinazie."
     ],
-    "image": "./images/recipe-17.webp"
+    "image": "./recipe-17.webp"
   },
   {
     "id": 17,
@@ -836,7 +836,7 @@ export const recipes = [
     "steps": [
       "Meng kwark en whey, beleg en rol op."
     ],
-    "image": "./images/recipe-18.webp"
+    "image": "./recipe-18.webp"
   },
   {
     "id": 18,
@@ -886,7 +886,7 @@ export const recipes = [
     "steps": [
       "Meng roomkaas en whey, voeg aardbeien toe."
     ],
-    "image": "./images/recipe-19.webp"
+    "image": "./recipe-19.webp"
   },
   {
     "id": 19,
@@ -946,7 +946,7 @@ export const recipes = [
       "Prak de gekookte eieren en meng ze met de yoghurt, mosterd en eventueel peper.",
       "Verdeel de eiersalade over de plakken komkommer."
     ],
-    "image": "./images/recipe-20.webp"
+    "image": "./recipe-20.webp"
   },
   {
     "id": 20,
@@ -1017,7 +1017,7 @@ export const recipes = [
       "Roer de yoghurt, mosterd en honing door elkaar. Snijd de komkommer en ijsbergsla.",
       "Beleg de wrap met kip, komkommer, sla en saus. Vouw dicht en rooster kort in een droge koekenpan."
     ],
-    "image": "./images/recipe-21.webp"
+    "image": "./recipe-21.webp"
   },
   {
     "id": 21,
@@ -1081,7 +1081,7 @@ export const recipes = [
       "Bak roerei. Prak de avocado en verdeel die met het roerei, de spinazie, kaas en peper over de wrap.",
       "Vouw de wrap dubbel en rooster beide kanten in een droge koekenpan tot de wrap krokant is."
     ],
-    "image": "./images/recipe-22.webp"
+    "image": "./recipe-22.webp"
   },
   {
     "id": 22,
@@ -1139,7 +1139,7 @@ export const recipes = [
       "Bak kleine pannenkoekjes en laat beide kanten gaar worden.",
       "Serveer met de kwark en frambozen."
     ],
-    "image": "./images/recipe-23.webp"
+    "image": "./recipe-23.webp"
   }
 ];
 
