@@ -10,6 +10,8 @@ import { blankSnapshot, openStore, loadLegacy, displayCatalogue, serializeBackup
 import { monday, matchesFilter, workProfile, workoutAfterShift, practical, newCook, labelCheckText } from './model.js';
 import { personalToday, workView, workProfilesView, workEditor, weekView, weekEditor, ownEditor, ownList, cookingView, filterDialog, safety } from './screens.js';
 import { attachFeatures } from './features.js';
+import { attachGym, gymPages, gymView } from './gym-ui.js';
+import { liveSession, chronological, syncGymAgenda } from './gym-model.js';
 
 const main = document.querySelector('main');
 const nav = document.querySelector('nav');
@@ -21,6 +23,7 @@ const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('s
 let hasPrevious = false;
 let advancedFilter = {};
 let featureRendered = () => {};
+let gymRendered = () => {};
 let initialized = false;
 let current = { name: 'home', id: null };
 let activePlan;
@@ -138,7 +141,8 @@ function storageNotice() {
 }
 
 function route() {
-  const [name, id, sub] = location.hash.slice(1).split('/');
+  const [name, id, sub, set] = location.hash.slice(1).split('/');
+  if (gymPages.includes(name) && [id, sub, set].every(key => !key || /^[\w-]{1,90}$/.test(key))) return { name, id, sub, set };
   if (['recipe', 'cook'].includes(name) && id !== undefined && byId.has(Number(id))) return { name, id: Number(id) };
   if (name === 'work') return { name, id: validDate(id) ? id : localDate() };
   if (name === 'week' || name === 'weekedit') return { name, id: monday(validDate(id) ? id : localDate()), sub };
@@ -155,7 +159,7 @@ function go(hash) {
 function render() {
   let selectedTab = current.name;
   if (['recipe','recipeedit','recipecopy','own','cook'].includes(selectedTab)) selectedTab = 'recipes';
-  if (['food','edit','week','weekedit','work'].includes(selectedTab)) selectedTab = 'agenda';
+  if (['food','edit','week','weekedit','work',...gymPages].includes(selectedTab)) selectedTab = 'agenda';
   if (['workprofiles','workedit'].includes(selectedTab)) selectedTab = 'profile';
   const count = groceryRows(db.grocery).filter(item => !item.checked).length;
   nav.innerHTML = `<div class="nav-inner">${navItems.map(([name, glyph, label]) =>
@@ -170,7 +174,7 @@ function render() {
   };
   document.body.classList.toggle('cooking', current.name === 'cook');
   main.dataset.page = current.name;
-  main.innerHTML = storageNotice() + views[current.name]();
+  main.innerHTML = storageNotice() + (gymPages.includes(current.name) ? gymView(current,db) : views[current.name]());
   document.title = (main.querySelector('h1')?.textContent || 'Vandaag') + ' · SnackLab';
 }
 
@@ -212,11 +216,15 @@ function home() {
   const shown = todayPlans.length ? todayPlans : next ? [next] : [];
   const openItems = groceryRows(db.grocery).filter(item => !item.checked).length;
   const nextPlan = todayPlans.find(plan => !plan.done) ?? next;
+  const activeWorkout = liveSession(db.gym);
+  const nextWorkout = db.gym.sessions.filter(item => item.status === 'planned' && item.date >= today).sort(chronological)[0];
   const shortcuts = [
     ['#recipes/quick', 'clock', 'Snel iets maken', 'Recepten binnen 5 min'],
     ['#grocery', 'basket', 'Boodschappen', openItems ? `${openItems} ${openItems === 1 ? 'product' : 'producten'} open` : 'Bekijk je lijst'],
     [nextPlan ? '#food/' + nextPlan.id : '#edit', 'calendar', nextPlan ? 'Sportvoeding' : 'Training plannen',
-      nextPlan ? (nextPlan.date === today ? 'Vandaag' : cap(dateLabel(nextPlan.date))) + ' · ' + nextPlan.time : 'Kies snacks rond je training']
+      nextPlan ? (nextPlan.date === today ? 'Vandaag' : cap(dateLabel(nextPlan.date))) + ' · ' + nextPlan.time : 'Kies snacks rond je training'],
+    [activeWorkout ? '#gymlog/' + activeWorkout.id : '#gym', 'bolt', activeWorkout ? 'Workout hervatten' : 'Workouts',
+      activeWorkout?.name ?? nextWorkout?.name ?? 'Plan en log je krachttraining']
   ];
   return `<div class="page-heading intro"><p class="date-label">${cap(dateLong.format(new Date()))}</p><h1>Vandaag</h1></div>
     ${personalToday(db,today)}
@@ -398,6 +406,7 @@ function groupRows(group, rows) {
 
 function planCard(plan) {
   const times = timing(plan);
+  const workout = db.gym.sessions.find(item => item.agenda === plan.id);
   return `<article class="panel plan-card">
     <div class="plan-top"><span class="plan-icon">${icon('calendar')}</span><div><p class="date-label">${cap(dateLabel(plan.date))} · ${plan.time}</p>
       <h3>${escapeHtml(plan.sport)}</h3></div>${plan.done ? '<span class="badge">Afgerond</span>' : ''}</div>
@@ -411,6 +420,7 @@ function planCard(plan) {
     }).join('')}</div>
     <div class="plan-actions">
       ${primaryLink('#food/' + plan.id, 'Sportvoeding', 'bolt')}
+      ${workout ? primaryLink('#gymlog/' + workout.id, 'Open workout') : ''}
       <a class="button" href="#edit/${plan.id}" data-edit-link>Aanpassen</a>
     </div>
     <details class="plan-options" id="options-${plan.id}" data-keep-open>
@@ -430,6 +440,7 @@ function agenda() {
   const visible = history ? other : upcoming;
   return `<div class="page-heading with-action"><h1>Agenda</h1><a class="button primary" href="#edit" data-edit-link>${icon('plus')} Training plannen</a></div>
     <div class="agenda-tools button-row">
+      ${primaryLink('#gym', 'Workouts', 'bolt')}
       ${primaryLink('#week/' + monday(localDate()), 'Weekplanner', 'calendar')}
       <a class="button" href="#work/${localDate()}">Werkdag</a><a class="button" href="#workprofiles">Werkprofielen</a>
     </div>
@@ -489,6 +500,7 @@ function food() {
   if (activePlan !== plan.id) foodPhase = 'pre';
   activePlan = plan.id;
   const advice = sportAdvice(plan, db);
+  const workout = db.gym.sessions.find(item => item.agenda === plan.id);
   const moments = phases.filter(([phase]) => plan[phase + 'Enabled']);
   const visible = moments.some(([phase]) => phase === foodPhase) ? foodPhase : moments[0]?.[0];
   const source = 'https://www.voedingscentrum.nl/nl/thema/eten-bij-sport-en-beweging/planning-eten-en-drinken-rond-sportmomenten.aspx';
@@ -499,7 +511,8 @@ function food() {
       </select></label>
       <p class="note">${formatTime(advice.times.start)} tot ${formatTime(advice.times.end)} · ${plan.duration} min · ${plan.intensity}
         <br>Laatste maaltijd om ${formatTime(advice.times.meal)} · ${plan.size.toLowerCase()}</p>
-      <a class="button text-button" href="#edit/${plan.id}" data-edit-link>Timing aanpassen</a>
+      <div class="button-row"><a class="button text-button" href="#edit/${plan.id}" data-edit-link>Timing aanpassen</a>
+        ${workout ? primaryLink('#gymlog/' + workout.id, 'Open workout') : ''}</div>
     </section>
     <div class="advice-grid">
       ${moments.length > 1 ? segments('food-phase', 'Snackmoment', moments.map(([phase, title]) => [phase,
@@ -632,7 +645,7 @@ async function restore(file) {
   if (file.size > maxBackupBytes) { announce('Kies een SnackLab-back-up van maximaal 120 MB.'); return; }
   try {
     const incoming = deserializeBackup(await file.text());
-    if (!confirm(`Back-up met ${incoming.plans.length} trainingen en ${incoming.customRecipes.length} eigen recepten terugzetten? Je huidige gegevens worden eerst als vorige back-up bewaard.`)) return;
+    if (!confirm(`Back-up met ${incoming.plans.length} agendatrainingen, ${incoming.gym.sessions.length} workouts en ${incoming.customRecipes.length} eigen recepten terugzetten? Je huidige gegevens worden eerst als vorige back-up bewaard.`)) return;
     adopt(await store.replace(incoming));
     hasPrevious = true;
     issues.read = issues.write = '';
@@ -685,6 +698,7 @@ function redraw({ focus = false, returnVisit, actionFocus } = {}) {
   render();
   catalogueResults();
   featureRendered();
+  gymRendered();
   for (const item of main.querySelectorAll('details[data-keep-open]')) item.open = open.has(item.id);
   if (focus) {
     const source = returnVisit && [...main.querySelectorAll('a[data-recipe-link]')].find(link =>
@@ -850,7 +864,10 @@ main.addEventListener('click', async event => {
       break;
     case 'plan-remove':
       if (!confirm('Deze training verwijderen?')) return;
-      changed = await update(state => { state.plans = state.plans.filter(item => item.id !== id); }, 'Training verwijderd.');
+      changed = await update(state => {
+        state.plans = state.plans.filter(item => item.id !== id);
+        for (const session of state.gym.sessions) if (session.agenda === id) session.agenda = null;
+      }, 'Training verwijderd.');
       break;
     case 'save-recipe-pick':
     case 'food-pick':
@@ -1000,6 +1017,7 @@ main.addEventListener('submit', async event => {
     }
     if (at >= 0) state.plans[at] = plan;
     else state.plans.push(plan);
+    syncGymAgenda(state,plan);
     return true;
   }, 'Training opgeslagen.');
   if (validated) {
@@ -1015,7 +1033,7 @@ function formFocus(formId, name) {
 history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', syncRoute);
 channel?.addEventListener('message', async () => {
-  if (!initialized || ['edit','recipeedit','recipecopy','workedit','weekedit','week'].includes(current.name) || main.querySelector('dialog[open]')) return;
+  if (!initialized || ['edit','recipeedit','recipecopy','workedit','weekedit','week','gymedit','gymset'].includes(current.name) || main.querySelector('dialog[open]')) return;
   await refreshState();
   redraw();
 });
@@ -1061,6 +1079,8 @@ featureRendered = attachFeatures(main, {
   filterCount: filter => findRecipes(filter).length,
   applyFilter: filter => { advancedFilter = filter; redraw(); }
 });
+
+gymRendered = attachGym(main,{getState: () => db,update,redraw,go,announce,route: () => current});
 
 async function start() {
   try {
