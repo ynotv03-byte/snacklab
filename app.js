@@ -1,16 +1,26 @@
 import { recipes, groceryGroups } from './data.js';
 import {
-  blankState, loadState, saveState, parseState, storageKey, legacyKey, restoreKey, newId, newPlan,
+  storageKey, legacyKey, restoreKey, newId, newPlan, validDate, parseTime, hazelnutRisk, metric,
   byId, sports, muscles, intensities, sizes, textures, phases, maxPortions, localDate, planError, timing,
-  formatTime, formatNumber, formatPortions, formatIngredient, scaleNutrition, searchRecipes,
+  formatTime, formatPortions, formatIngredient, scaleNutrition, searchRecipes,
   groceryRows, setGroceryPortions, shoppingText, sportAdvice
 } from './core.js';
+
+import { blankSnapshot, openStore, loadLegacy, displayCatalogue, serializeBackup, deserializeBackup, maxBackupBytes } from './store.js';
+import { monday, matchesFilter, workProfile, workoutAfterShift, practical, newCook, labelCheckText } from './model.js';
+import { personalToday, workView, workProfilesView, workEditor, weekView, weekEditor, ownEditor, ownList, cookingView, filterDialog, safety } from './screens.js';
+import { attachFeatures } from './features.js';
 
 const main = document.querySelector('main');
 const nav = document.querySelector('nav');
 const toast = document.querySelector('#toast');
 const issues = { read: '', write: '' };
-let db = blankState();
+let db = blankSnapshot();
+const store = openStore();
+const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('snacklab6:' + new URL('./', location.href).pathname) : null;
+let hasPrevious = false;
+let advancedFilter = {};
+let featureRendered = () => {};
 let initialized = false;
 let current = { name: 'home', id: null };
 let activePlan;
@@ -23,6 +33,7 @@ let foodPhase = 'pre';
 const catalogue = { query: '', taste: '', filters: new Set(), sort: 'taste' };
 let toastTimer;
 let pendingWorker;
+let exportURL;
 
 const icons = {
   home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/>',
@@ -77,7 +88,7 @@ const section = (title, href, label) => `<div class="section-head"><h2>${title}<
 const heading = (title, subtitle = '') => `<div class="page-heading"><h1>${title}</h1>${subtitle ? `<p>${subtitle}</p>` : ''}</div>`;
 const sortedPlans = () => [...db.plans].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 const nutritionNote = 'Geschat voor deze portie. Merken en gebruikte hoeveelheden kunnen de waarden veranderen.';
-const allergenNote = 'Controleer de verpakking op hazelnoot en andere allergenen, ook bij whey, wraps en beleg. Let op waarschuwingen voor kruisbesmetting.';
+const allergenNote = labelCheckText;
 const activeFilters = () => Boolean(catalogue.taste || catalogue.filters.size);
 const upcomingPlan = plan => plan.date >= localDate() && !plan.done;
 const segments = (action, label, items, value) => `<div class="segments" role="group" aria-label="${label}">${items.map(([id, name]) =>
@@ -90,36 +101,35 @@ function announce(message) {
   toastTimer = setTimeout(() => { toast.hidden = true; }, 4300);
 }
 
-function refreshState() {
-  try {
-    db = loadState(localStorage);
-    issues.read = '';
-  } catch (error) {
-    if (error.name === 'SecurityError') {
-      issues.read = '';
-      issues.write = 'Lokale opslag is geblokkeerd. Wijzigingen blijven in deze sessie beschikbaar. Exporteer een back-up.';
-    } else {
-      issues.read = 'De opgeslagen gegevens konden niet worden gelezen. Download het oorspronkelijke bestand via Profiel vóór je een back-up herstelt.';
-    }
-  }
+function adopt(state) {
+  db = state;
+  displayCatalogue(db);
 }
 
-function update(change, message) {
-  if (!issues.write) refreshState();
-  if (issues.read) {
-    announce(issues.read);
+async function refreshState() {
+  try {
+    const state = await store.read();
+    if (state) adopt(state);
+  } catch { /* Keep the last usable snapshot until the next explicit read or write. */ }
+}
+
+async function update(change, message, form) {
+  try {
+    const saved = await store.write(change);
+    if (!saved) return false;
+    adopt(saved);
+    issues.read = issues.write = '';
+    channel?.postMessage('changed');
+    if (message) announce(message);
+    return true;
+  } catch (error) {
+    const text = error.name === 'QuotaExceededError' ? 'De opslag is vol. De eerdere gegevens zijn bewaard.' :
+      'Opslaan lukt niet. ' + (error.message || 'Probeer opnieuw.');
+    const status = form?.querySelector('.form-message');
+    if (status) status.textContent = text;
+    else announce(text);
     return false;
   }
-  if (change(db) === false) return false;
-  try {
-    saveState(localStorage, db);
-    issues.write = '';
-  } catch {
-    issues.write = 'Wijzigingen zijn alleen in deze sessie beschikbaar. Exporteer eerst een back-up.';
-    announce(issues.write);
-  }
-  if (message && !issues.write) announce(message);
-  return true;
 }
 
 function storageNotice() {
@@ -128,10 +138,12 @@ function storageNotice() {
 }
 
 function route() {
-  const [name, id] = location.hash.slice(1).split('/');
-  if (name === 'main') return current;
-  if (name === 'recipe' && id !== undefined && byId.has(Number(id))) return { name, id: Number(id) };
-  if (['home', 'recipes', 'grocery', 'agenda', 'profile', 'food', 'edit'].includes(name)) return { name, id };
+  const [name, id, sub] = location.hash.slice(1).split('/');
+  if (['recipe', 'cook'].includes(name) && id !== undefined && byId.has(Number(id))) return { name, id: Number(id) };
+  if (name === 'work') return { name, id: validDate(id) ? id : localDate() };
+  if (name === 'week' || name === 'weekedit') return { name, id: monday(validDate(id) ? id : localDate()), sub };
+  if (['recipeedit','recipecopy'].includes(name)) return { name, id: Number(id) || null };
+  if (['home', 'recipes', 'grocery', 'agenda', 'profile', 'food', 'edit', 'workprofiles', 'workedit', 'own'].includes(name)) return { name, id };
   return { name: 'home', id: null };
 }
 
@@ -142,21 +154,29 @@ function go(hash) {
 
 function render() {
   let selectedTab = current.name;
-  if (selectedTab === 'recipe') selectedTab = 'recipes';
-  if (['food', 'edit'].includes(selectedTab)) selectedTab = 'agenda';
+  if (['recipe','recipeedit','recipecopy','own','cook'].includes(selectedTab)) selectedTab = 'recipes';
+  if (['food','edit','week','weekedit','work'].includes(selectedTab)) selectedTab = 'agenda';
+  if (['workprofiles','workedit'].includes(selectedTab)) selectedTab = 'profile';
   const count = groceryRows(db.grocery).filter(item => !item.checked).length;
   nav.innerHTML = `<div class="nav-inner">${navItems.map(([name, glyph, label]) =>
     `<a href="#${name}"${name === selectedTab ? ' aria-current="page"' : ''}><span class="nav-icon">${icon(glyph)}
     ${name === 'grocery' && count ? `<span class="nav-count" aria-hidden="true">${count}</span>` : ''}</span>
     <span>${label}</span></a>`).join('')}</div>`;
-  const views = { home, recipes: catalogueView, recipe: recipeView, grocery, agenda, food, edit, profile };
+  const views = { home, recipes: catalogueView, recipe: recipeView, grocery, agenda, food, edit, profile,
+    work: () => workView(db,current.id), workprofiles: () => workProfilesView(db), workedit: () => workEditor(db,current.id),
+    week: () => weekView(db,current.id), weekedit: () => weekEditor(db,current.id,current.sub ?? 'new'),
+    own: () => ownList(db), recipeedit: () => ownEditor(db,current.id), recipecopy: () => ownEditor(db,current.id,true),
+    cook: () => cookingView(byId.get(current.id), db, db.cooking[current.id] ?? newCook(portions[current.id] ?? 1))
+  };
+  document.body.classList.toggle('cooking', current.name === 'cook');
   main.dataset.page = current.name;
   main.innerHTML = storageNotice() + views[current.name]();
   document.title = (main.querySelector('h1')?.textContent || 'Vandaag') + ' · SnackLab';
 }
 
 function photo(recipe, { priority = false, cls = '' } = {}) {
-  return `<img class="${cls}" src="${recipe.image}" alt="" width="480" height="480"
+  if (!recipe.image) return `<div class="recipe-placeholder ${cls}" aria-hidden="true">${icon('book')}</div>`;
+  return `<img class="${cls}" src="${escapeHtml(recipe.image)}" alt="" width="480" height="480"
     ${priority ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">`;
 }
 
@@ -172,16 +192,17 @@ function recipeCard(recipe) {
     <a href="#recipe/${recipe.id}" class="recipe-card-link" data-recipe-link>
       <div class="recipe-frame">${photo(recipe)}</div>
       <div class="recipe-copy"><${title}>${escapeHtml(recipe.name)}</${title}>
-        <p>${icon('clock')} ${recipe.minutes} min <span aria-hidden="true">·</span> ${recipe.protein} g eiwit</p></div>
+        <p>${icon('clock')} ${recipe.minutes} min <span aria-hidden="true">·</span> ${Number.isFinite(recipe.protein) ? metric(recipe.protein) + ' eiwit' : 'Eiwit onbekend'}</p>
+        ${hazelnutRisk(recipe) ? '<small class="allergen-tag">Hazelnoot of sporen genoemd</small>' : ''}</div>
     </a>${favourite(recipe)}
   </article>`;
 }
 
 function home() {
-  const filtered = searchRecipes(db);
+  const filtered = searchRecipes(db).filter(recipe => !hazelnutRisk(recipe));
   const personalized = db.favorites.length || db.preferences.taste !== 'alles' || db.preferences.texture ||
     Object.values(db.ratings).some(rating => rating > 0);
-  const featured = personalized ? filtered[0] : byId.get(22);
+  const featured = personalized ? filtered[0] ?? byId.get(22) : byId.get(22);
   const suggestions = personalized ? filtered.filter(recipe => recipe !== featured).slice(0, 4) :
     [20, 6, 21, 5].map(id => byId.get(id));
   const today = localDate();
@@ -198,11 +219,12 @@ function home() {
       nextPlan ? (nextPlan.date === today ? 'Vandaag' : cap(dateLabel(nextPlan.date))) + ' · ' + nextPlan.time : 'Kies snacks rond je training']
   ];
   return `<div class="page-heading intro"><p class="date-label">${cap(dateLong.format(new Date()))}</p><h1>Vandaag</h1></div>
+    ${personalToday(db,today)}
     <article class="hero">
       <div class="hero-photo" data-recipe="${featured.id}">${photo(featured, { priority: true, cls: 'hero-image' })}</div>
       <div class="hero-copy"><span class="eyebrow">${personalized ? 'Voor jou' : 'Receptsuggestie'}</span>
         <h2>${escapeHtml(featured.name)}</h2>
-        <p>${icon('clock')} ${featured.minutes} min <span>·</span> ${featured.protein} g eiwit</p>
+        <p>${icon('clock')} ${featured.minutes} min <span>·</span> ${Number.isFinite(featured.protein) ? metric(featured.protein) + ' eiwit' : 'Eiwit onbekend'}</p>
         <a class="button primary" href="#recipe/${featured.id}" data-recipe-link>Bekijk recept ${icon('right')}</a>
       </div>
     </article>
@@ -217,7 +239,7 @@ function home() {
 }
 
 function catalogueView() {
-  return heading('Recepten') +
+  return `<div class="page-heading with-action"><h1>Recepten</h1><a class="button" href="#own">${icon('book')} Eigen recepten</a></div>` +
     `<div class="catalogue-controls">
       <div class="search-box">
         <label for="recipe-search" class="sr-only">Zoek een snack</label>${icon('search')}
@@ -232,20 +254,26 @@ function catalogueView() {
       </div>
     </div>
     <div class="catalogue-results-bar">
+      ${`<button class="button advanced-button" type="button" data-v6="filter-open">${icon('sliders')} Filters${Object.keys(advancedFilter).length ? ' · actief' : ''}</button>`}
       <p class="result-count" id="result-count" aria-live="polite"></p>
       <label class="sort-label">${icon('sliders')}<span class="sr-only">Sorteer recepten</span><select id="recipe-sort">${options(sorts, catalogue.sort)}</select></label>
     </div>
-    <div id="recipe-results" class="recipe-grid"></div>`;
+    <div id="recipe-results" class="recipe-grid"></div>${filterDialog(db,advancedFilter)}`;
+}
+
+function findRecipes(filter = advancedFilter) {
+  return searchRecipes(db, { query: catalogue.query, filter: catalogue.taste || 'all', sort: catalogue.sort })
+    .filter(recipe => (!catalogue.filters.has('favorites') || db.favorites.includes(recipe.id))
+      && (!catalogue.filters.has('quick') || recipe.minutes <= 5)
+      && (!catalogue.filters.has('protein') || recipe.protein >= 20)
+      && matchesFilter(recipe, filter, db));
 }
 
 function catalogueResults() {
   const result = document.getElementById('recipe-results');
   if (!result) return;
-  const found = searchRecipes(db, { query: catalogue.query, filter: catalogue.taste || 'all', sort: catalogue.sort })
-    .filter(recipe => (!catalogue.filters.has('favorites') || db.favorites.includes(recipe.id))
-      && (!catalogue.filters.has('quick') || recipe.minutes <= 5)
-      && (!catalogue.filters.has('protein') || recipe.protein >= 20));
-  const onlyFavorites = catalogue.filters.has('favorites') && catalogue.filters.size === 1 && !catalogue.query && !catalogue.taste;
+  const found = findRecipes();
+  const onlyFavorites = catalogue.filters.has('favorites') && catalogue.filters.size === 1 && !catalogue.query && !catalogue.taste && !Object.keys(advancedFilter).length;
   document.getElementById('result-count').textContent = found.length + (found.length === 1 ? ' recept' : ' recepten');
   result.innerHTML = found.length ? found.map(recipeCard).join('') :
     empty(onlyFavorites ? 'Nog geen favorieten' : 'Geen recepten gevonden',
@@ -260,13 +288,20 @@ function recipeView() {
   const inList = db.grocery.recipes[recipe.id] ?? 0;
   const measurements = recipe.ingredients.map(item => formatIngredient(item, n));
   const back = recipeVisit?.back ?? '#recipes';
-  const backLabel = { home: 'Vandaag', recipes: 'Recepten', grocery: 'Boodschappen', agenda: 'Agenda', food: 'Sportvoeding' }[back.split('/')[0].slice(1)] ?? 'Recepten';
+  const backLabel = { home: 'Vandaag', recipes: 'Recepten', grocery: 'Boodschappen', agenda: 'Agenda', food: 'Sportvoeding', work: 'Werkdag', week: 'Weekplanner', own: 'Eigen recepten' }[back.split('/')[0].slice(1)] ?? 'Recepten';
   const plan = recipeVisit?.plan && planById(recipeVisit.plan);
   return `<a href="${escapeHtml(back)}" class="back" data-recipe-back>${icon('back')} ${backLabel}</a>
     <div class="detail-top">${photo(recipe, { priority: true })}
       <div class="detail-copy"><div class="detail-tags"><span class="badge">${cap(recipe.taste)}</span>
       <span>${icon('clock')} ${recipe.minutes} min</span></div>
-      <h1>${escapeHtml(recipe.name)}</h1>${favourite(recipe)}</div></div>
+      <h1>${escapeHtml(recipe.name)}</h1>${recipe.description ? `<p class="recipe-description">${escapeHtml(recipe.description)}</p>` : ''}${favourite(recipe)}</div></div>
+    <div class="button-row recipe-actions">
+      <button class="button primary" type="button" data-v6="cook-open" data-id="${recipe.id}">${icon('book')} ${db.cooking[recipe.id] ? 'Kookmodus hervatten' : 'Start kookmodus'}</button>
+      ${recipe.custom && !recipe.archived ? `<a class="button" href="#recipeedit/${recipe.id}">Bewerken</a>
+        <a class="button" href="#recipecopy/${recipe.id}">Dupliceren</a>
+        <button class="button text-button danger" type="button" data-v6="recipe-archive" data-id="${recipe.id}">Verwijderen</button>` : ''}
+    </div>
+    ${hazelnutRisk(recipe) ? safety(recipe) : ''}
     <div class="jump-links" role="group" aria-label="In dit recept">
       ${[['ingredients', 'Ingrediënten'], ['preparation', 'Bereiding'], ['nutrition', 'Voedingswaarden']].map(([id, title]) =>
         button('jump', title, `data-id="${id}"`, 'jump')).join('')}
@@ -282,14 +317,15 @@ function recipeView() {
           `<li><span>${escapeHtml(cap(name))}</span><strong>${escapeHtml(amount || 'Naar smaak')}</strong></li>`).join('')}</ul>
         ${button('grocery-add', icon('basket') + ' Voeg toe aan boodschappen', `data-id="${recipe.id}" data-n="${n}"${disabled(inList + n > maxPortions)}`, 'primary ingredient-action')}
         ${inList ? `<p class="note"><a href="#grocery">${formatPortions(inList)} op je boodschappenlijst</a>${inList + n > maxPortions ? ' · maximaal 12 porties per recept' : ''}</p>` : ''}
-        ${plan ? `<div class="button-row head-actions">
+        ${plan && !hazelnutRisk(recipe) ? `<div class="button-row head-actions">
           ${button('save-recipe-pick', recipeVisit.phase === 'pre' ? 'Bewaar als snack vooraf' : 'Bewaar als snack achteraf',
             `data-id="${plan.id}" data-phase="${recipeVisit.phase}" data-n="${recipe.id}" data-portions="${n}"`)}</div>` : ''}
       </section>
       <section class="panel" id="preparation" tabindex="-1">
         <h2>Bereiding</h2>
         <ol class="steps">${recipe.steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
-        <p class="note">${recipe.allergens.length ? 'Op basis van de ingrediënten: ' + escapeHtml(recipe.allergens.join(', ')) + '. ' : ''}${allergenNote}</p>
+        <p class="note">${recipe.allergens.length ? 'Op basis van de ingrediënten: ' + escapeHtml(recipe.allergens.join(', ')) + '. ' : 'Geen allergenen opgegeven. '}${allergenNote}</p>
+        ${recipe.custom ? `<p class="note">${practical(recipe).storage === 'cold' ? 'Koeling nodig. ' : practical(recipe).storage === 'shelf' ? 'Door jou als ongekoeld meeneembaar ingevoerd. ' : 'Koeling onbekend. '}${escapeHtml(practical(recipe).note)}</p>` : ''}
         <label class="field rating"><span>Jouw beoordeling</span><select id="rating-select">
           ${options([[0, 'Nog te proberen'], ...[1, 2, 3, 4, 5].map(n => [n, n + (n === 1 ? ' ster' : ' sterren')])], db.ratings[recipe.id] ?? 0)}
         </select></label>
@@ -297,8 +333,8 @@ function recipeView() {
     </div>
     <section class="panel block" id="nutrition" tabindex="-1"><h2>Voedingswaarden</h2><div class="nutrition">
       ${[['kcal', 'kcal'], ['protein', 'eiwit'], ['carbs', 'koolhydraten'], ['fat', 'vet'], ['fiber', 'vezels']].map(([key, label]) =>
-        `<div><strong>${formatNumber(nutrition[key])}${key !== 'kcal' ? ' g' : ''}</strong><small>${label}</small></div>`).join('')}
-    </div><p class="note">${nutritionNote}</p></section>`;
+        `<div><strong>${metric(nutrition[key], key === 'kcal' ? '' : 'g')}</strong><small>${label}</small></div>`).join('')}
+    </div><p class="note">${nutritionNote}${recipe.custom && recipe.nutritionSource === 'estimate' ? ' Berekend met de lokale USDA-bibliotheek.' : ''}</p></section>`;
 }
 
 function grocery() {
@@ -322,6 +358,7 @@ function grocery() {
         ${button('share', icon('share') + ' Deel open lijst', disabled(!remaining.length), 'share-button')}
       </div>` : ''}
       </section>
+      <div class="shop-sources stack"${!sources.length && !Object.keys(db.grocery.weekImports).length ? ' hidden' : ''}>
       ${sources.length ? `<details class="panel source-panel" id="grocery-sources" data-keep-open>
         <summary><span>${icon('book')} Recepten op je lijst</span><span class="source-count">${sources.length}</span>${icon('down', 'toggle-icon')}</summary>
         ${sources.map(([id, n]) => {
@@ -335,6 +372,12 @@ function grocery() {
             </div></div>`;
         }).join('')}
       </details>` : ''}
+      ${Object.keys(db.grocery.weekImports).length ? `<details class="panel form-section" id="grocery-weeks" data-keep-open>
+        <summary>Weekboodschappen</summary><div class="section-body"><ul class="clean-list">
+        ${Object.keys(db.grocery.weekImports).sort().map(key => `<li><a href="#week/${key}">Week van ${escapeHtml(dateLabel(key))}</a>
+          <button class="button text-button danger" type="button" data-v6="week-unimport" data-key="${key}">Haal van lijst</button></li>`).join('')}
+        </ul></div></details>` : ''}
+      </div>
       <section class="grocery-list${visible.length ? ' panel' : ''}" aria-label="Boodschappenlijst">
       ${visible.length ? groceryGroups.map(group => groupRows(group, visible)).join('') :
         empty(rows.length ? 'Alles afgevinkt' : 'Je lijst is leeg', rows.length ? 'Tik op Alles om je volledige lijst te bekijken.' : 'Voeg hierboven een product toe of kies ingrediënten uit een recept.',
@@ -386,6 +429,10 @@ function agenda() {
   const history = agendaView === 'history';
   const visible = history ? other : upcoming;
   return `<div class="page-heading with-action"><h1>Agenda</h1><a class="button primary" href="#edit" data-edit-link>${icon('plus')} Training plannen</a></div>
+    <div class="agenda-tools button-row">
+      ${primaryLink('#week/' + monday(localDate()), 'Weekplanner', 'calendar')}
+      <a class="button" href="#work/${localDate()}">Werkdag</a><a class="button" href="#workprofiles">Werkprofielen</a>
+    </div>
     ${segments('agenda-filter', 'Getoonde trainingen', [['upcoming', `Gepland (${upcoming.length})`], ['history', `Geschiedenis (${other.length})`]], agendaView)}
     <section class="agenda-list" aria-label="${history ? 'Geschiedenis' : 'Geplande trainingen'}">
       ${visible.length ? visible.map(planCard).join('') : history ?
@@ -395,12 +442,18 @@ function agenda() {
 
 function edit() {
   const old = planById(current.id);
-  if (current.id && !old) return heading('Training aanpassen') + empty('Training niet gevonden', 'Open een bestaande training vanuit je agenda.', primaryLink('#agenda', 'Naar agenda'));
+  const workDate = current.id?.startsWith('work-') ? current.id.slice(5) : '';
+  const suggested = validDate(workDate) ? workoutAfterShift(workProfile(db,workDate),workDate) : null;
+  if (current.id && !old && !suggested) return heading('Training aanpassen') + empty('Training niet gevonden', 'Open een bestaande training vanuit je agenda.', primaryLink('#agenda', 'Naar agenda'));
   const p = old ?? newPlan();
+  if (suggested) {
+    const previous = parseTime(suggested.time) - 120;
+    Object.assign(p, suggested, { meal: formatTime((previous + 1440) % 1440), mealPreviousDay: previous < 0 });
+  }
   const pairs = values => values.map(value => [value, value]);
   const editVisit = history.state?.snacklabEdit;
-  const back = editVisit ?? (old ? '#food/' + old.id : '#agenda');
-  const backLabel = back === '#home' ? 'Vandaag' : back.startsWith('#food') ? 'Sportvoeding' : 'Agenda';
+  const back = editVisit ?? (suggested ? '#work/' + workDate : old ? '#food/' + old.id : '#agenda');
+  const backLabel = back === '#home' ? 'Vandaag' : back.startsWith('#food') ? 'Sportvoeding' : back.startsWith('#work') ? 'Werkdag' : 'Agenda';
   const field = (name, title, type, attrs = '') => `<label class="field"><span>${title}</span><input name="${name}" type="${type}" required value="${escapeHtml(p[name])}" ${attrs}></label>`;
   const select = (name, title, values) => `<label class="field"><span id="label-${name}">${title}</span><select name="${name}" aria-labelledby="label-${name}">${options(pairs(values), p[name])}</select></label>`;
   return `<a class="back" href="${escapeHtml(back)}" data-edit-back>${icon('back')} ${backLabel}</a>${heading(old ? 'Training aanpassen' : 'Training plannen')}
@@ -473,13 +526,14 @@ function adviceSection(plan, advice, phase) {
           'Als je maaltijd nog op zich laat wachten, kun je kiezen voor een snack met eiwit.';
   const active = plan[phase + 'Pick'];
   const ranked = advice[phase];
-  const selectedSnack = active?.i >= 0 ? ranked.find(item => item.i === active.i) : null;
+  const storedRecipe = active?.i >= 0 ? byId.get(active.i) : null;
+  const selectedSnack = storedRecipe ? { recipe: storedRecipe, i: storedRecipe.id, n: active.n } : null;
   const top = ranked.filter(item => item.i !== selectedSnack?.i);
   const skip = foodChoice(plan, phase, { i: -1, n: 0, reason: '' });
   const suggestSkip = active?.i === -1 || (!selectedSnack && (pre ? advice.preOptional : advice.postOptional));
   return `<section class="advice-section"><div class="section-head"><h2>${title}</h2><span class="badge">${formatTime(advice.times[phase])}</span></div>
     <p class="muted advice-note">${text}</p>
-    ${selectedSnack ? foodChoice(plan, phase, { ...selectedSnack, n: active.n, reason: 'Je bewaarde portie.' }) : ''}
+    ${selectedSnack ? foodChoice(plan, phase, { ...selectedSnack, n: active.n, reason: hazelnutRisk(selectedSnack.recipe) ? 'Hazelnoot of mogelijke sporen opgegeven. Kies een ander recept.' : 'Je bewaarde portie.' }) : ''}
     ${suggestSkip ? skip : ''}
     ${top.slice(0, 3).map(item => foodChoice(plan, phase, item)).join('')}
     <details class="panel more-advice" id="advice-${plan.id}-${phase}" data-keep-open>
@@ -499,25 +553,27 @@ function foodChoice(plan, phase, option) {
     ${recipe ? photo(recipe, { cls: 'choice-image' }) : ''}
     <div class="choice-copy">
     <h3>${recipe ? `<a href="#recipe/${i}" data-recipe-link data-portions="${n}" data-plan="${plan.id}" data-phase="${phase}">${escapeHtml(recipe.name)}</a>` : 'Geen extra snack'}</h3>
-    ${recipe ? `<p><strong>${formatPortions(n)}</strong> · ±${formatNumber(nutrition.kcal)} kcal · ${formatNumber(nutrition.carbs)} g KH · ${formatNumber(nutrition.protein)} g eiwit</p>` : ''}
+    ${recipe ? `<p><strong>${formatPortions(n)}</strong> ·  ${nutrition.kcal === null ? 'kcal onbekend' : '±' + metric(nutrition.kcal,'kcal')} · ${metric(nutrition.carbs)} KH · ${metric(nutrition.protein)} eiwit</p>` : ''}
     ${reason ? `<p class="note">${reason}</p>` : ''}
     </div>
     <div class="button-row">
       ${button('food-pick', chosen ? icon('check') + ' Gekozen' : recipe ? 'Kies snack' : 'Kies geen snack', attrs + disabled(chosen))}
-      ${recipe && chosen ? button('grocery-add', icon('basket') + ' Naar boodschappen', `data-id="${i}" data-phase="${phase}" data-n="${n}"${disabled(inList + n > maxPortions)}`) : ''}
+      ${recipe && chosen && !hazelnutRisk(recipe) ? button('grocery-add', icon('basket') + ' Naar boodschappen', `data-id="${i}" data-phase="${phase}" data-n="${n}"${disabled(inList + n > maxPortions)}`) : ''}
     </div></article>`;
 }
 
 function profile() {
   const preference = db.preferences;
-  let recovered = false;
+  let recovered = hasPrevious;
   let legacy = false;
   try {
-    recovered = localStorage.getItem(restoreKey) !== null;
+    recovered ||= localStorage.getItem(restoreKey) !== null;
     legacy = localStorage.getItem(legacyKey) !== null;
   } catch { /* The status message above gives the recovery path. */ }
   return heading('Profiel') +
     `<div class="detail-grid profile-grid">
+      <section class="panel profile-work"><h2>Werkprofielen</h2><p>Stel je diensten, pauzes, koeling en voorbereidingstijd in voor persoonlijke suggesties.</p>
+        <a class="button primary" href="#workprofiles">Werkprofielen beheren</a></section>
       <section class="panel"><h2>Mijn smaak</h2>
         <div class="fields">
           <label class="field"><span>Voorkeur voor smaak</span><select id="taste">
@@ -533,13 +589,14 @@ function profile() {
         <p class="note">Bij een kort tijdsvenster krijgt een kleine, lichtere portie voorrang.</p>
       </section>
       <section class="panel"><h2>Mijn gegevens</h2>
-        <p>Je trainingen, beoordelingen en boodschappen staan lokaal op dit apparaat. Met een JSON-back-up kun je ze ook op een ander apparaat openen.</p>
+        <p>Je recepten, foto’s, weekplannen, trainingen en instellingen staan op dit apparaat. Exporteer een JSON-back-up om ze te bewaren of naar een ander apparaat te verplaatsen.</p>
         <div class="button-row">
           ${button('backup', 'Exporteer back-up', '', 'primary')}
           ${issues.read ? button('download-raw', 'Download oorspronkelijke gegevens') : ''}
           ${legacy ? button('download-legacy', 'Download 4.1-back-up') : ''}
           ${recovered ? button('download-restore', 'Download vorige gegevens') : ''}
         </div>
+        <div id="backup-download"></div>
         <label class="field import"><span>Back-up herstellen</span><input type="file" id="backup-file" accept="application/json,.json"></label>
         <p class="note">Herstellen vervangt je huidige gegevens na bevestiging. Download eerst een back-up van deze versie als je die wilt bewaren.</p>
       </section>
@@ -555,33 +612,35 @@ function profile() {
 }
 
 function download(filename, data) {
-  const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+  if (exportURL) URL.revokeObjectURL(exportURL);
+  exportURL = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
   const anchor = document.createElement('a');
-  anchor.href = url;
+  anchor.href = exportURL;
   anchor.download = filename;
-  document.body.append(anchor);
+  const target = document.querySelector('#backup-download');
+  if (target) {
+    anchor.className = 'manual-download';
+    anchor.textContent = 'Download bestand';
+    target.replaceChildren(anchor);
+  } else document.body.append(anchor);
   anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  if (!target) anchor.remove();
 }
 
 async function restore(file) {
   if (!file) return;
-  if (file.size > 5 * 1024 * 1024) {
-    announce('Kies een SnackLab-back-up van maximaal 5 MB.');
-    return;
-  }
+  if (file.size > maxBackupBytes) { announce('Kies een SnackLab-back-up van maximaal 120 MB.'); return; }
   try {
-    const incoming = parseState(await file.text());
-    if (!confirm(`Back-up met ${incoming.plans.length} trainingen herstellen? Je huidige gegevens worden vervangen.`)) return;
-    saveState(localStorage, incoming, true);
-    db = incoming;
-    issues.read = '';
-    issues.write = '';
+    const incoming = deserializeBackup(await file.text());
+    if (!confirm(`Back-up met ${incoming.plans.length} trainingen en ${incoming.customRecipes.length} eigen recepten terugzetten? Je huidige gegevens worden eerst als vorige back-up bewaard.`)) return;
+    adopt(await store.replace(incoming));
+    hasPrevious = true;
+    issues.read = issues.write = '';
     activePlan = undefined;
     portions = {};
+    channel?.postMessage('changed');
     announce('Back-up hersteld.');
-    redraw();
+    syncRoute();
   } catch (error) {
     announce(error instanceof SyntaxError ? 'Dit bestand bevat geen geldige JSON.' : error.message || 'Herstellen is mislukt.');
   }
@@ -625,6 +684,7 @@ function redraw({ focus = false, returnVisit, actionFocus } = {}) {
   const open = new Set(returnVisit?.panels ?? (focus ? [] : openPanels()));
   render();
   catalogueResults();
+  featureRendered();
   for (const item of main.querySelectorAll('details[data-keep-open]')) item.open = open.has(item.id);
   if (focus) {
     const source = returnVisit && [...main.querySelectorAll('a[data-recipe-link]')].find(link =>
@@ -650,6 +710,11 @@ function syncRoute() {
   if (location.hash === '#main') return;
   const lastVisit = recipeVisit;
   current = route();
+  if (current.name !== 'profile' && exportURL) {
+    const previous = exportURL;
+    exportURL = undefined;
+    setTimeout(() => URL.revokeObjectURL(previous), 10000);
+  }
   const visit = history.state?.snacklabRecipe;
   recipeVisit = current.name === 'recipe' && visit?.recipeId === current.id ? visit : undefined;
   if (recipeVisit?.portions && portions[current.id] === undefined) portions[current.id] = recipeVisit.portions;
@@ -659,7 +724,6 @@ function syncRoute() {
     current.id = undefined;
     history.replaceState(null, '', '#recipes');
   }
-  if (initialized && !issues.write) refreshState();
   const target = location.hash || '#home';
   redraw({ focus: initialized, returnVisit: lastVisit?.back === target ? lastVisit : undefined });
   initialized = true;
@@ -669,9 +733,10 @@ function resetSearch() {
   catalogue.query = '';
   catalogue.taste = '';
   catalogue.filters.clear();
+  advancedFilter = {};
 }
 
-main.addEventListener('click', event => {
+main.addEventListener('click', async event => {
   const link = event.target.closest('a[data-recipe-link]');
   const navigate = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
   if (link && navigate) {
@@ -711,7 +776,7 @@ main.addEventListener('click', event => {
   let changed = true;
   switch (action) {
     case 'favorite':
-      changed = update(state => {
+      changed = await update(state => {
         state.favorites = state.favorites.includes(recipeId) ?
           state.favorites.filter(value => value !== recipeId) : [...state.favorites, recipeId];
       });
@@ -751,7 +816,7 @@ main.addEventListener('click', event => {
       portions[recipeId] = Math.min(maxPortions, Math.max(.5, (portions[recipeId] ?? 1) + amount));
       break;
     case 'grocery-add':
-      changed = update(state => {
+      changed = await update(state => {
         const count = (state.grocery.recipes[recipeId] ?? 0) + amount;
         if (count > maxPortions) {
           announce('Maximaal 12 porties per recept op je boodschappenlijst.');
@@ -761,10 +826,10 @@ main.addEventListener('click', event => {
       }, 'Ingrediënten toegevoegd aan boodschappen.');
       break;
     case 'grocery-remove':
-      changed = update(state => setGroceryPortions(state.grocery, recipeId, 0), 'Recept verwijderd uit boodschappen.');
+      changed = await update(state => setGroceryPortions(state.grocery, recipeId, 0), 'Recept verwijderd uit boodschappen.');
       break;
     case 'manual-remove':
-      changed = update(state => {
+      changed = await update(state => {
         state.grocery.manual = state.grocery.manual.filter(item => item.id !== id);
         delete state.grocery.checked['manual:' + id];
       }, 'Product verwijderd.');
@@ -776,7 +841,7 @@ main.addEventListener('click', event => {
       void share();
       return;
     case 'plan-toggle':
-      changed = update(state => {
+      changed = await update(state => {
         const plan = state.plans.find(item => item.id === id);
         if (!plan) return false;
         plan.done = !plan.done;
@@ -785,13 +850,18 @@ main.addEventListener('click', event => {
       break;
     case 'plan-remove':
       if (!confirm('Deze training verwijderen?')) return;
-      changed = update(state => { state.plans = state.plans.filter(item => item.id !== id); }, 'Training verwijderd.');
+      changed = await update(state => { state.plans = state.plans.filter(item => item.id !== id); }, 'Training verwijderd.');
       break;
     case 'save-recipe-pick':
     case 'food-pick':
-      changed = update(state => {
+      changed = await update((state, catalogue) => {
         const plan = state.plans.find(item => item.id === id);
         if (!plan) return false;
+        if (amount >= 0) {
+          const recipe = catalogue.get(amount);
+          if (!recipe || recipe.archived) throw new Error('Dit recept is niet meer beschikbaar.');
+          if (hazelnutRisk(recipe)) throw new Error('Dit recept noemt hazelnoot of mogelijke sporen.');
+        }
         plan[phase + 'Pick'] = { i: amount, n: Number(control.dataset.portions) };
       }, 'Snackkeuze opgeslagen.');
       if (changed && action === 'save-recipe-pick') {
@@ -803,13 +873,20 @@ main.addEventListener('click', event => {
       }
       break;
     case 'backup':
-      download('snacklab-backup-' + localDate() + '.json', JSON.stringify(db, null, 2));
+      control.disabled = true;
+      try { download('snacklab6-backup-' + localDate() + '.json', await serializeBackup(db)); }
+      catch { announce('De back-up kon niet worden gemaakt.'); }
+      finally { control.disabled = false; }
       return;
     case 'download-raw':
     case 'download-legacy':
     case 'download-restore': {
       const key = { 'download-raw': storageKey, 'download-legacy': legacyKey, 'download-restore': restoreKey }[action];
       try {
+        if (action === 'download-restore' && hasPrevious) {
+          const previous = await store.previous();
+          if (previous) { download('snacklab-vorige-backup.json', await serializeBackup(previous)); return; }
+        }
         const raw = localStorage.getItem(key);
         if (raw !== null) download(key + '.json', raw);
       } catch {
@@ -833,33 +910,33 @@ main.addEventListener('input', event => {
   if (input.form?.id === 'grocery-form' && input.name === 'name') groceryDraft.name = input.value;
 });
 
-main.addEventListener('change', event => {
+main.addEventListener('change', async event => {
   const input = event.target;
   if (input.id === 'recipe-sort') {
     catalogue.sort = input.value;
     catalogueResults();
   } else if (input.id === 'rating-select') {
-    update(state => { state.ratings[current.id] = Number(input.value); }, 'Beoordeling opgeslagen.');
+    await update(state => { state.ratings[current.id] = Number(input.value); }, 'Beoordeling opgeslagen.');
   } else if (input.id === 'food-plan') {
     go('#food/' + input.value);
   } else if (input.form?.id === 'grocery-form' && input.name === 'group') {
     groceryDraft.group = input.value;
   } else if (input.id === 'taste' || input.id === 'texture') {
-    update(state => { state.preferences[input.id] = input.value; }, 'Voorkeur opgeslagen.');
+    await update(state => { state.preferences[input.id] = input.value; }, 'Voorkeur opgeslagen.');
   } else if (input.name === 'sensitive') {
-    update(state => { state.sensitive = input.checked; }, 'Voorkeur opgeslagen.');
+    await update(state => { state.sensitive = input.checked; }, 'Voorkeur opgeslagen.');
   } else if (input.id === 'backup-file') {
     const file = input.files[0];
     input.value = '';
     void restore(file);
   } else if (input.classList.contains('source-portions')) {
-    update(state => setGroceryPortions(state.grocery, Number(input.dataset.id), Number(input.value)));
+    await update(state => setGroceryPortions(state.grocery, Number(input.dataset.id), Number(input.value)));
     redraw();
     [...main.querySelectorAll('.source-portions')].find(el => el.dataset.id === input.dataset.id)?.focus({ preventScroll: true });
   } else if (input.classList.contains('grocery-check')) {
     const { key } = input.dataset;
     const index = [...main.querySelectorAll('.grocery-check')].indexOf(input);
-    update(state => {
+    await update(state => {
       if (input.checked) state.grocery.checked[key] = true;
       else delete state.grocery.checked[key];
     });
@@ -879,8 +956,9 @@ main.addEventListener('change', event => {
   if (issues.write && !main.querySelector('.notice')) main.insertAdjacentHTML('afterbegin', storageNotice());
 });
 
-main.addEventListener('submit', event => {
+main.addEventListener('submit', async event => {
   const form = event.target;
+  if (form.dataset.feature) return;
   const values = new FormData(form);
   if (form.id === 'grocery-form') {
     event.preventDefault();
@@ -889,7 +967,7 @@ main.addEventListener('submit', event => {
       announce('Vul een productnaam in.');
       return;
     }
-    if (update(state => { state.grocery.manual.push({ id: newId(), name, group: values.get('group') }); }, 'Product toegevoegd.')) {
+    if (await update(state => { state.grocery.manual.push({ id: newId(), name, group: values.get('group') }); }, 'Product toegevoegd.')) {
       groceryDraft.name = '';
       redraw();
       formFocus('grocery-form', 'name');
@@ -899,9 +977,9 @@ main.addEventListener('submit', event => {
   if (form.id !== 'plan-form') return;
   event.preventDefault();
   const id = form.dataset.id;
-  const validated = update(state => {
+  const validated = await update(state => {
     const at = state.plans.findIndex(plan => plan.id === id);
-    if (current.id && at < 0) {
+    if (current.id && !current.id.startsWith('work-') && at < 0) {
       announce('Deze training is intussen verwijderd.');
       return false;
     }
@@ -936,10 +1014,9 @@ function formFocus(formId, name) {
 
 history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', syncRoute);
-window.addEventListener('storage', event => {
-  if (event.key !== storageKey && event.key !== null) return;
-  if (issues.write || current.name === 'edit') return;
-  refreshState();
+channel?.addEventListener('message', async () => {
+  if (!initialized || ['edit','recipeedit','recipecopy','workedit','weekedit','week'].includes(current.name) || main.querySelector('dialog[open]')) return;
+  await refreshState();
   redraw();
 });
 
@@ -977,5 +1054,22 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   });
 }
 
-refreshState();
-syncRoute();
+featureRendered = attachFeatures(main, {
+  getState: () => db, update, redraw, go, announce, route: () => current,
+  getPortions: id => portions[id] ?? 1,
+  getFilter: () => advancedFilter,
+  filterCount: filter => findRecipes(filter).length,
+  applyFilter: filter => { advancedFilter = filter; redraw(); }
+});
+
+async function start() {
+  try {
+    adopt(await store.init());
+    hasPrevious = Boolean(await store.previous());
+  } catch (error) {
+    try { adopt(loadLegacy()); } catch { /* Raw legacy data remains available for export. */ }
+    issues.read = 'Lokale gegevens konden niet volledig worden geopend. Exporteer je gegevens in Profiel. ' + (error.message || '');
+  }
+  syncRoute();
+}
+void start();

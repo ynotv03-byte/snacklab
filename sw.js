@@ -1,11 +1,12 @@
 // Bump the cache name whenever a precached asset changes.
 const PREFIX = 'snacklab-' + self.registration.scope + ':';
-const CACHE = PREFIX + 'v5.1.0';
+const CACHE = PREFIX + 'v6.0.0';
 const LEGACY_CACHE = 'snacklab-v41-pwa-1';
 const asset = file => new URL(file, self.registration.scope).href;
 const SHELL = asset('index.html');
 const ASSETS = new Set([
-  'index.html', 'styles.css', 'app.js', 'core.js', 'data.js', 'manifest.webmanifest',
+  'index.html', 'styles.css', 'app.js', 'core.js', 'data.js', 'model.js', 'store.js',
+  'screens.js', 'features.js', 'ingredients.js', 'v6.css', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png',
   ...Array.from({ length: 23 }, (_, i) => 'recipe-' + String(i + 1).padStart(2, '0') + '.webp')
 ].map(asset));

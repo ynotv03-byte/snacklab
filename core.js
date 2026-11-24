@@ -3,8 +3,15 @@ import { recipes, groceryGroups } from './data.js';
 export const storageKey = 'snacklab41';
 export const legacyKey = 'snacklab41-before-v5';
 export const restoreKey = 'snacklab41-before-restore';
-export const schemaVersion = 5;
-export const byId = new Map(recipes.map(recipe => [recipe.id, recipe]));
+export const schemaVersion = 6;
+export const builtinRecipes = recipes.slice();
+export const builtinMap = new Map(builtinRecipes.map(recipe => [recipe.id, recipe]));
+export const byId = new Map(builtinMap);
+export function setOwnRecipes(entries) {
+  recipes.splice(builtinRecipes.length, recipes.length, ...entries.filter(recipe => !recipe.archived));
+  byId.clear();
+  for (const recipe of [...builtinRecipes, ...entries]) byId.set(recipe.id, recipe);
+}
 export const sports = ['Krachttraining', 'Voetbal', 'Hardlopen', 'Padel', 'Fietsen', 'Wandelen'];
 export const muscles = ['Borst', 'Biceps', 'Triceps', 'Schouders', 'Rug', 'Benen', 'Buik', 'Billen'];
 export const intensities = ['Rustig', 'Normaal', 'Zwaar'];
@@ -65,11 +72,11 @@ export function validPortions(n) {
   return Number.isFinite(n) && n >= 0.5 && n <= maxPortions && Number.isInteger(n * 2);
 }
 
-function validPick(pick) {
-  return record(pick) && (pick.i === -1 ? pick.n === 0 : byId.has(pick.i) && validPortions(pick.n));
+function validPick(pick, catalogue) {
+  return record(pick) && (pick.i === -1 ? pick.n === 0 : catalogue.has(pick.i) && validPortions(pick.n));
 }
 
-function validPlan(plan) {
+function validPlan(plan, catalogue) {
   return record(plan) && typeof plan.id === 'string' && idPattern.test(plan.id) &&
     validDate(plan.date) && Number.isFinite(parseTime(plan.time)) && Number.isFinite(parseTime(plan.meal)) &&
     sports.includes(plan.sport) && intensities.includes(plan.intensity) && sizes.includes(plan.size) &&
@@ -77,7 +84,7 @@ function validPlan(plan) {
     integer(plan.duration, 10, 300) && integer(plan.lead, 0, 240) && integer(plan.delay, 0, 240) &&
     ['preEnabled', 'postEnabled', 'hungry', 'nextMeal', 'hot', 'done', 'mealPreviousDay'].every(key =>
       plan[key] === undefined || typeof plan[key] === 'boolean') &&
-    phases.every(([key]) => plan[key + 'Pick'] === undefined || validPick(plan[key + 'Pick']));
+    phases.every(([key]) => plan[key + 'Pick'] === undefined || validPick(plan[key + 'Pick'], catalogue));
 }
 
 export function blankState() {
@@ -88,26 +95,26 @@ export function blankState() {
   };
 }
 
-export function parseState(raw) {
+export function parseState(raw, catalogue = byId) {
   const data = JSON.parse(raw);
   if (!record(data) || !Array.isArray(data.plans) || !record(data.ratings) ||
-    (data.schemaVersion !== undefined && data.schemaVersion !== schemaVersion)) {
-    throw new Error('Dit bestand is geen ondersteunde SnackLab-back-up (4.1 of 5).');
+    (data.schemaVersion !== undefined && ![5, schemaVersion].includes(data.schemaVersion))) {
+    throw new Error('Dit bestand is geen ondersteunde SnackLab-back-up (4.1, 5 of 6).');
   }
   const ids = new Set(data.plans.map(plan => plan?.id));
-  if (ids.size !== data.plans.length || !data.plans.every(validPlan)) {
+  if (ids.size !== data.plans.length || !data.plans.every(plan => validPlan(plan, catalogue))) {
     throw new Error('De back-up bevat een training met ongeldige gegevens.');
   }
   const state = { ...blankState(), ...data, schemaVersion };
   if (!Object.entries(state.ratings).every(([id, rating]) => /^\d+$/.test(id) && integer(rating, 0, 5)) ||
-    typeof state.sensitive !== 'boolean' || !Array.isArray(state.favorites) || !state.favorites.every(id => byId.has(id)) ||
+    typeof state.sensitive !== 'boolean' || !Array.isArray(state.favorites) || !state.favorites.every(id => catalogue.has(id)) ||
     !record(state.preferences) || !tastes.includes(state.preferences.taste) ||
     !['', ...textures].includes(state.preferences.texture)) {
     throw new Error('De back-up bevat ongeldige beoordelingen of voorkeuren.');
   }
   const list = state.grocery;
   if (!record(list) || !record(list.recipes) || !Array.isArray(list.manual) || !record(list.checked) ||
-    !Object.entries(list.recipes).every(([id, n]) => String(Number(id)) === id && byId.has(Number(id)) && validPortions(n)) ||
+    !Object.entries(list.recipes).every(([id, n]) => String(Number(id)) === id && catalogue.has(Number(id)) && validPortions(n)) ||
     !list.manual.every(item => record(item) && typeof item.id === 'string' && idPattern.test(item.id) &&
       typeof item.name === 'string' && item.name.trim().length > 0 && item.name.length <= 120 && groceryGroups.includes(item.group)) ||
     new Set(list.manual.map(item => item.id)).size !== list.manual.length ||
@@ -115,22 +122,6 @@ export function parseState(raw) {
     throw new Error('De back-up bevat ongeldige boodschappen.');
   }
   return state;
-}
-
-export function loadState(storage) {
-  const raw = storage.getItem(storageKey);
-  return raw === null ? blankState() : parseState(raw);
-}
-
-export function saveState(storage, state, replacing = false) {
-  const raw = storage.getItem(storageKey);
-  if (raw !== null) {
-    if (replacing) storage.setItem(restoreKey, raw);
-    else if (JSON.parse(raw).schemaVersion === undefined && storage.getItem(legacyKey) === null) {
-      storage.setItem(legacyKey, raw);
-    }
-  }
-  storage.setItem(storageKey, JSON.stringify(state));
 }
 
 export const newId = () => globalThis.crypto?.randomUUID?.() ?? (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
@@ -143,8 +134,11 @@ export function newPlan(today = localDate()) {
   };
 }
 
+export const nutrientKeys = ['kcal', 'protein', 'carbs', 'fat', 'fiber'];
+export const nutrientLabels = { kcal: 'kcal', protein: 'eiwit', carbs: 'koolhydraten', fat: 'vet', fiber: 'vezels' };
+
 export function scaleNutrition(recipe, portions) {
-  return Object.fromEntries(['kcal', 'protein', 'carbs', 'fat', 'fiber'].map(key => [key, recipe[key] * portions]));
+  return Object.fromEntries(nutrientKeys.map(key => [key, Number.isFinite(recipe[key]) ? recipe[key] * portions : null]));
 }
 
 export function formatQuantity(amount, unit) {
@@ -153,7 +147,8 @@ export function formatQuantity(amount, unit) {
   if (unit === 'stuk' || unit === 'tl' || unit === 'teen') {
     const whole = Math.floor(amount);
     const fractions = ['⅛', '¼', '⅜', '½', '⅝', '¾', '⅞'];
-    const part = fractions[Math.round((amount - whole) * 8) - 1];
+    const eighths = (amount - whole) * 8;
+    const part = Number.isInteger(eighths) ? fractions[eighths - 1] : undefined;
     if (part) quantity = (whole ? whole + ' ' : '') + part;
     if (unit === 'teen' && amount > 1) unit = 'tenen';
   }
@@ -170,38 +165,55 @@ export function formatIngredient(ingredient, portions = 1) {
   };
 }
 
-export const formatNumber = value => fmt.format(Math.round(value * 10) / 10);
+export const formatNumber = value => Number.isFinite(value) ? fmt.format(Math.round(value * 10) / 10) : '—';
+export const metric = (value, unit = 'g') => Number.isFinite(value) ? formatNumber(value) + (unit ? ' ' + unit : '') : '—';
 export const formatPortions = n => formatQuantity(n, 'stuk') + (n > 1 ? ' porties' : ' portie');
-const ingredientKey = ingredient => 'ingredient:' + ingredient.product + ':' + ingredient.unit;
-const manualKey = item => 'manual:' + item.id;
+export const normalizeText = value => String(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
-export function groceryRows(list) {
+export function shoppingIngredient(item) {
+  const product = normalizeText(item.product).replace(/\s+/g, ' ');
+  const aliases = { ei: 'eieren', 'volkoren wraps': 'volkoren wrap' };
+  const unit = { kg: 'g', l: 'ml' }[item.unit] ?? item.unit;
+  return { ...item, product: Object.hasOwn(aliases, product) ? aliases[product] : product, unit,
+    amount: item.amount === null ? null : item.amount * (unit === item.unit ? 1 : 1000), prep: '' };
+}
+const ingredientKey = item => 'ingredient:' + item.product + ':' + item.unit;
+
+export function groceryRows(list, catalogue = byId) {
   const result = new Map();
-  for (const [id, count] of Object.entries(list.recipes)) {
-    for (const ingredient of byId.get(Number(id)).ingredients) {
-      const key = ingredientKey(ingredient);
-      const row = result.get(key) ?? { ...ingredient, key, amount: ingredient.amount === null ? null : 0, prep: '' };
-      if (ingredient.amount !== null) row.amount += ingredient.amount * count;
+  const sources = [list.recipes, ...Object.values(list.weekImports ?? {})];
+  for (const source of sources) for (const [id, count] of Object.entries(source)) {
+    for (const ingredient of catalogue.get(Number(id))?.ingredients ?? []) {
+      const item = shoppingIngredient(ingredient);
+      const key = ingredientKey(item);
+      const row = result.get(key) ?? { ...item, key, amount: null };
+      if (item.amount !== null) row.amount = (row.amount ?? 0) + item.amount * count;
       result.set(key, row);
     }
   }
-  const rows = [...result.values()].map(row => ({ ...row, ...formatIngredient(row) }));
-  for (const item of list.manual) rows.push({ ...item, key: manualKey(item), amount: '', manualId: item.id });
+  const rows = [...result.values()].map(row => ({ ...row, quantity: row.amount, ...formatIngredient(row) }));
+  for (const item of list.manual) rows.push({ ...item, key: 'manual:' + item.id, amount: '', manualId: item.id });
   return rows.map(row => ({ ...row, checked: list.checked[row.key] === true }))
     .sort((a, b) => groceryGroups.indexOf(a.group) - groceryGroups.indexOf(b.group) ||
       Number(a.checked) - Number(b.checked) || a.name.localeCompare(b.name, 'nl'));
 }
 
-export function setGroceryPortions(list, id, count) {
-  if (!byId.has(id) || (count !== 0 && !validPortions(count))) return false;
-  const before = list.recipes[id] ?? 0;
+export function reconcileChecks(list, previous, catalogue = byId) {
+  const before = new Map(previous.map(row => [row.key, row]));
+  const after = new Map(groceryRows(list, catalogue).map(row => [row.key, row]));
+  for (const key of Object.keys(list.checked)) {
+    const old = before.get(key);
+    const now = after.get(key);
+    if (!now || !old || (now.quantity ?? 0) > (old.quantity ?? 0) + 1e-6) delete list.checked[key];
+  }
+}
+
+export function setGroceryPortions(list, id, count, catalogue = byId) {
+  if (!catalogue.has(id) || (count !== 0 && !validPortions(count))) return false;
+  const before = groceryRows(list, catalogue);
   if (count) list.recipes[id] = count;
   else delete list.recipes[id];
-  if (count > before) for (const item of byId.get(id).ingredients) {
-    if (item.amount !== null) delete list.checked[ingredientKey(item)];
-  }
-  const existing = new Set(groceryRows(list).map(row => row.key));
-  for (const key of Object.keys(list.checked)) if (!existing.has(key)) delete list.checked[key];
+  reconcileChecks(list, before, catalogue);
   return true;
 }
 
@@ -220,10 +232,9 @@ export function tasteScore(recipe, state) {
 }
 
 export function searchRecipes(state, { query = '', filter = 'all', sort = 'taste' } = {}) {
-  const normalize = value => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const words = normalize(query.trim()).split(/\s+/).filter(Boolean);
+  const words = normalizeText(query).split(/\s+/).filter(Boolean);
   return recipes.filter(recipe => {
-    const terms = normalize([recipe.name, recipe.taste, ...recipe.tags, ...recipe.ingredients.map(item => item.product)].join(' '));
+    const terms = normalizeText([recipe.name, recipe.description ?? '', recipe.taste, ...recipe.tags, ...recipe.ingredients.map(item => item.product)].join(' '));
     if (!words.every(word => terms.includes(word))) return false;
     if (filter === 'favorites') return state.favorites.includes(recipe.id);
     if (filter === 'quick') return recipe.minutes <= 5;
@@ -231,13 +242,19 @@ export function searchRecipes(state, { query = '', filter = 'all', sort = 'taste
     return filter === 'all' || filter === recipe.taste;
   }).sort((a, b) => {
     if (sort === 'minutes') return a.minutes - b.minutes || a.id - b.id;
-    if (sort === 'protein') return b.protein - a.protein || a.id - b.id;
+    if (sort === 'protein') return (b.protein ?? -1) - (a.protein ?? -1) || a.id - b.id;
     if (sort === 'name') return a.name.localeCompare(b.name, 'nl');
     return tasteScore(b, state) - tasteScore(a, state) || a.id - b.id;
   });
 }
 
-export function sportAdvice(plan, state) {
+export function hazelnutRisk(recipe) {
+  return ['contains', 'traces'].includes(recipe.hazelnut) ||
+    [recipe.name, ...recipe.allergens, ...recipe.ingredients.map(item => item.product)].some(value =>
+      /hazel[ -]?no(?:ot|ten)|hazelnut/i.test(value));
+}
+
+export function sportAdvice(plan, state, available = recipes) {
   const times = timing(plan);
   const endurance = ['Voetbal', 'Hardlopen', 'Padel', 'Fietsen'].includes(plan.sport);
   const long = endurance && plan.duration >= 60 && plan.intensity !== 'Rustig';
@@ -248,22 +265,25 @@ export function sportAdvice(plan, state) {
   const preOptional = !plan.hungry && (recentlyAte || (!demanding && plan.duration <= 45));
   const postOptional = plan.nextMeal || (!strength && !demanding && plan.duration <= 45);
   const prioritizeProtein = strength || demanding;
-  const pre = recipes.map(recipe => {
+  const candidates = available.filter(recipe => !hazelnutRisk(recipe));
+  const pre = candidates.filter(recipe => !recipe.custom || recipe.moments.includes('pre')).map(recipe => {
     const n = light ? 0.5 : 1;
     const nutrition = scaleNutrition(recipe, n);
-    const heavy = light && (nutrition.fat > 5 || nutrition.fiber > 3 || recipe.weight * n > 150);
-    const reason = heavy ? 'Meer vet, vezels of volume voor dit korte tijdsvenster.' :
+    const known = [nutrition.carbs, nutrition.fat, nutrition.fiber].every(Number.isFinite);
+    const heavy = light && known && (nutrition.fat > 5 || nutrition.fiber > 3 || (recipe.weight ?? 0) * n > 150);
+    const reason = !known ? 'Koolhydraten, vet of vezels zijn deels onbekend.' : heavy ? 'Meer vet, vezels of volume voor dit korte tijdsvenster.' :
       nutrition.carbs >= 12 ? 'Levert koolhydraten in deze portie.' : 'Bevat weinig koolhydraten in deze portie.';
-    const score = (heavy ? -50 : 0) + Math.min(nutrition.carbs, 30) * 1.1 -
-      nutrition.fat * (light ? 4 : 1.3) - nutrition.fiber * (light ? 3 : .7) - (light ? recipe.weight * n / 35 : 0);
+    const score = (heavy ? -50 : 0) + Math.min(nutrition.carbs ?? 0, 30) * 1.1 -
+      (nutrition.fat ?? 0) * (light ? 4 : 1.3) - (nutrition.fiber ?? 0) * (light ? 3 : .7) -
+      (light ? (recipe.weight ?? 0) * n / 35 : 0) - (known ? 0 : 35);
     return { recipe, i: recipe.id, n, reason, score: score + tasteScore(recipe, state) * .7 };
   });
-  const post = recipes.map(recipe => {
-    const reason = recipe.protein >= 20 && demanding && recipe.carbs >= 25 ? 'Combineert eiwit met koolhydraten.' :
+  const post = candidates.filter(recipe => !recipe.custom || recipe.moments.includes('post')).map(recipe => {
+    const reason = recipe.protein === null ? 'Eiwitgehalte onbekend.' : recipe.protein >= 20 && demanding && recipe.carbs >= 25 ? 'Combineert eiwit met koolhydraten.' :
       recipe.protein >= 20 && prioritizeProtein ? 'Eiwitrijke optie binnen je recepten.' :
         demanding && recipe.carbs >= 25 ? 'Koolhydraatrijke optie binnen je recepten.' : 'Aanvulling op je gewone maaltijden.';
-    const score = Math.min(recipe.protein, 30) * (prioritizeProtein ? 2 : .4) +
-      Math.min(recipe.carbs, 40) * (demanding ? 1.35 : .2) - (postOptional ? recipe.kcal / 28 : 0);
+    const score = Math.min(recipe.protein ?? 0, 30) * (prioritizeProtein ? 2 : .4) +
+      Math.min(recipe.carbs ?? 0, 40) * (demanding ? 1.35 : .2) - (postOptional ? (recipe.kcal ?? 0) / 28 : 0) - (recipe.protein === null ? 30 : 0);
     return { recipe, i: recipe.id, n: 1, reason, score: score + tasteScore(recipe, state) * .8 };
   });
   const best = (a, b) => b.score - a.score || a.i - b.i;
