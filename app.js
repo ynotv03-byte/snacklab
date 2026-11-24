@@ -14,11 +14,13 @@ let db = blankState();
 let initialized = false;
 let current = { name: 'home', id: null };
 let activePlan;
-let recipeBack = '#recipes';
-let recipePlanContext;
+let recipeVisit;
 let portions = {};
-let groceryView = 'all';
-let catalogue = { query: '', filter: 'all', sort: 'taste' };
+let groceryView = 'open';
+let groceryDraft = { name: '', group: 'Overig' };
+let agendaView = 'upcoming';
+let foodPhase = 'pre';
+const catalogue = { query: '', taste: '', filters: new Set(), sort: 'taste' };
 let toastTimer;
 let pendingWorker;
 
@@ -35,18 +37,24 @@ const icons = {
   minus: '<path d="M5 12h14"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
   back: '<path d="m14 6-6 6 6 6"/>',
-  check: '<path d="m5 12 4 4L19 6"/>'
+  check: '<path d="m5 12 4 4L19 6"/>',
+  right: '<path d="m9 6 6 6-6 6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  close: '<path d="m6 6 12 12M6 18 18 6"/>',
+  sliders: '<path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="2" fill="currentColor"/><circle cx="16" cy="17" r="2" fill="currentColor"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  share: '<path d="M12 15V3m-4 4 4-4 4 4M7 11H5v10h14V11h-2"/>'
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none"
   stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icons[name]}</svg>`;
-document.querySelector('#header-profile').innerHTML = icon('settings');
+document.querySelector('#header-favorites').innerHTML = icon('heart');
 const navItems = [
   ['home', 'home', 'Vandaag'], ['recipes', 'book', 'Recepten'], ['grocery', 'basket', 'Boodschappen'],
   ['agenda', 'calendar', 'Agenda'], ['profile', 'settings', 'Profiel']
 ];
 const filters = [
   ['all', 'Alles'], ['hartig', 'Hartig'], ['zoet', 'Zoet'], ['quick', 'Binnen 5 min'],
-  ['protein', '20 g eiwit of meer'], ['favorites', 'Favorieten']
+  ['protein', 'Eiwitrijk'], ['favorites', 'Favorieten']
 ];
 const sorts = [['taste', 'Voor jou'], ['minutes', 'Snelste eerst'], ['protein', 'Meeste eiwit'], ['name', 'Naam A–Z']];
 const dateLong = new Intl.DateTimeFormat('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -70,6 +78,10 @@ const heading = (title, subtitle = '') => `<div class="page-heading"><h1>${title
 const sortedPlans = () => [...db.plans].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 const nutritionNote = 'Geschat voor deze portie. Merken en gebruikte hoeveelheden kunnen de waarden veranderen.';
 const allergenNote = 'Controleer de verpakking op hazelnoot en andere allergenen, ook bij whey, wraps en beleg. Let op waarschuwingen voor kruisbesmetting.';
+const activeFilters = () => Boolean(catalogue.taste || catalogue.filters.size);
+const upcomingPlan = plan => plan.date >= localDate() && !plan.done;
+const segments = (action, label, items, value) => `<div class="segments" role="group" aria-label="${label}">${items.map(([id, name]) =>
+  button(action, name, `data-id="${id}" aria-pressed="${id === value}"`, 'segment')).join('')}</div>`;
 
 function announce(message) {
   toast.hidden = false;
@@ -124,33 +136,23 @@ function route() {
 }
 
 function go(hash) {
-  if (location.hash === hash) render();
+  if (location.hash === hash) redraw();
   else location.hash = hash;
 }
 
-function render({ focus = false, actionFocus = null } = {}) {
+function render() {
   let selectedTab = current.name;
   if (selectedTab === 'recipe') selectedTab = 'recipes';
   if (['food', 'edit'].includes(selectedTab)) selectedTab = 'agenda';
   const count = groceryRows(db.grocery).filter(item => !item.checked).length;
   nav.innerHTML = `<div class="nav-inner">${navItems.map(([name, glyph, label]) =>
-    `<a href="#${name}"${name === selectedTab ? ' aria-current="page"' : ''}>${icon(glyph)}
-    ${name === 'grocery' && count ? `<span class="nav-count" aria-hidden="true">${count}</span>` : ''}
+    `<a href="#${name}"${name === selectedTab ? ' aria-current="page"' : ''}><span class="nav-icon">${icon(glyph)}
+    ${name === 'grocery' && count ? `<span class="nav-count" aria-hidden="true">${count}</span>` : ''}</span>
     <span>${label}</span></a>`).join('')}</div>`;
   const views = { home, recipes: catalogueView, recipe: recipeView, grocery, agenda, food, edit, profile };
+  main.dataset.page = current.name;
   main.innerHTML = storageNotice() + views[current.name]();
   document.title = (main.querySelector('h1')?.textContent || 'Vandaag') + ' · SnackLab';
-  if (focus) {
-    scrollTo(0, 0);
-    main.focus({ preventScroll: true });
-  } else if (actionFocus) {
-    const { action, id, phase, n, key } = actionFocus;
-    const same = [...main.querySelectorAll('[data-action]')].find(el => {
-      const d = el.dataset;
-      return d.action === action && d.id === id && d.phase === phase && d.n === n && d.key === key;
-    });
-    if (same && !same.disabled) same.focus({ preventScroll: true });
-  }
 }
 
 function photo(recipe, { priority = false, cls = '' } = {}) {
@@ -165,11 +167,12 @@ function favourite(recipe) {
 }
 
 function recipeCard(recipe) {
-  const meta = `${recipe.minutes} min · ${recipe.protein} g eiwit`;
+  const title = current.name === 'recipes' ? 'h2' : 'h3';
   return `<article class="recipe-card">
     <a href="#recipe/${recipe.id}" class="recipe-card-link" data-recipe-link>
-      ${photo(recipe)}
-      <div class="recipe-copy"><h3>${escapeHtml(recipe.name)}</h3><p>${meta}</p></div>
+      <div class="recipe-frame">${photo(recipe)}</div>
+      <div class="recipe-copy"><${title}>${escapeHtml(recipe.name)}</${title}>
+        <p>${icon('clock')} ${recipe.minutes} min <span aria-hidden="true">·</span> ${recipe.protein} g eiwit</p></div>
     </a>${favourite(recipe)}
   </article>`;
 }
@@ -186,44 +189,68 @@ function home() {
   const todayPlans = plans.filter(plan => plan.date === today);
   const next = plans.find(plan => plan.date > today && !plan.done);
   const shown = todayPlans.length ? todayPlans : next ? [next] : [];
+  const openItems = groceryRows(db.grocery).filter(item => !item.checked).length;
+  const nextPlan = todayPlans.find(plan => !plan.done) ?? next;
+  const shortcuts = [
+    ['#recipes/quick', 'clock', 'Snel iets maken', 'Recepten binnen 5 min'],
+    ['#grocery', 'basket', 'Boodschappen', openItems ? `${openItems} ${openItems === 1 ? 'product' : 'producten'} open` : 'Bekijk je lijst'],
+    [nextPlan ? '#food/' + nextPlan.id : '#edit', 'calendar', nextPlan ? 'Sportvoeding' : 'Training plannen',
+      nextPlan ? (nextPlan.date === today ? 'Vandaag' : cap(dateLabel(nextPlan.date))) + ' · ' + nextPlan.time : 'Kies snacks rond je training']
+  ];
   return `<div class="page-heading intro"><p class="date-label">${cap(dateLong.format(new Date()))}</p><h1>Vandaag</h1></div>
     <article class="hero">
+      <div class="hero-photo" data-recipe="${featured.id}">${photo(featured, { priority: true, cls: 'hero-image' })}</div>
       <div class="hero-copy"><span class="eyebrow">${personalized ? 'Voor jou' : 'Receptsuggestie'}</span>
         <h2>${escapeHtml(featured.name)}</h2>
         <p>${icon('clock')} ${featured.minutes} min <span>·</span> ${featured.protein} g eiwit</p>
-        ${primaryLink('#recipe/' + featured.id, 'Bekijk recept')}
-      </div><div class="hero-photo">${photo(featured, { priority: true, cls: 'hero-image' })}</div>
+        <a class="button primary" href="#recipe/${featured.id}" data-recipe-link>Bekijk recept ${icon('right')}</a>
+      </div>
     </article>
+    <div class="shortcuts">${shortcuts.map(([href, glyph, label, caption]) =>
+      `<a class="shortcut" href="${href}"${href === '#edit' ? ' data-edit-link' : ''}><span class="shortcut-icon">${icon(glyph)}</span>
+        <span class="shortcut-copy"><strong>${label}</strong><small>${escapeHtml(caption)}</small></span>${icon('right', 'shortcut-arrow')}</a>`).join('')}</div>
     <section class="block">${section('Snacks om te proberen', '#recipes', 'Alle recepten')}
       <div class="recipe-grid home-grid">${suggestions.map(recipeCard).join('')}</div>
     </section>
-    <section class="block">${section(todayPlans.length ? 'Training vandaag' : 'Je volgende training', '#agenda', 'Naar agenda')}
-    ${shown.length ? shown.map(planCard).join('') :
-      empty('Nog geen training gepland', 'Plan een training om snacks vóór en na het sporten te kiezen.', primaryLink('#edit', 'Training plannen', 'plus'))}</section>`;
+    ${shown.length ? `<section class="block">${section(todayPlans.length ? 'Training vandaag' : 'Je volgende training', '#agenda', 'Naar agenda')}
+      ${shown.map(planCard).join('')}</section>` : ''}`;
 }
 
 function catalogueView() {
-  return heading('Recepten', 'Zoek op recept, ingrediënt of smaak.') +
-    `<div class="catalogue-bar">
-      <label class="search-box">${icon('search')}<span class="sr-only">Zoek een snack</span>
-      <input id="recipe-search" type="search" placeholder="Zoek een snack" value="${escapeHtml(catalogue.query)}" autocomplete="off"></label>
-      <label class="sort-label"><span class="sr-only">Sorteer recepten</span><select id="recipe-sort">${options(sorts, catalogue.sort)}</select></label>
+  return heading('Recepten') +
+    `<div class="catalogue-controls">
+      <div class="search-box">
+        <label for="recipe-search" class="sr-only">Zoek een snack</label>${icon('search')}
+        <input id="recipe-search" type="search" placeholder="Zoek op recept of ingrediënt" value="${escapeHtml(catalogue.query)}" autocomplete="off" enterkeyhint="search">
+        <button type="button" class="search-clear" data-action="clear-query" aria-label="Wis zoekterm"${catalogue.query ? '' : ' hidden'}>${icon('close')}</button>
+      </div>
+      <div class="filters" role="group" aria-label="Receptfilters">
+        ${filters.map(([key, title]) => {
+          const pressed = key === 'all' ? !activeFilters() : key === catalogue.taste || catalogue.filters.has(key);
+          return `<button type="button" class="chip" data-action="filter" data-id="${key}" aria-pressed="${pressed}"${key === 'protein' ? ' aria-description="20 g eiwit of meer per portie"' : ''}>${title}</button>`;
+        }).join('')}
+      </div>
     </div>
-    <div class="filters" aria-label="Receptfilters">
-      ${filters.map(([key, title]) => `<button type="button" class="chip" data-action="filter" data-id="${key}" aria-pressed="${key === catalogue.filter}">${title}</button>`).join('')}
+    <div class="catalogue-results-bar">
+      <p class="result-count" id="result-count" aria-live="polite"></p>
+      <label class="sort-label">${icon('sliders')}<span class="sr-only">Sorteer recepten</span><select id="recipe-sort">${options(sorts, catalogue.sort)}</select></label>
     </div>
-    <p class="result-count" id="result-count" aria-live="polite"></p>
     <div id="recipe-results" class="recipe-grid"></div>`;
 }
 
 function catalogueResults() {
   const result = document.getElementById('recipe-results');
   if (!result) return;
-  const found = searchRecipes(db, catalogue);
+  const found = searchRecipes(db, { query: catalogue.query, filter: catalogue.taste || 'all', sort: catalogue.sort })
+    .filter(recipe => (!catalogue.filters.has('favorites') || db.favorites.includes(recipe.id))
+      && (!catalogue.filters.has('quick') || recipe.minutes <= 5)
+      && (!catalogue.filters.has('protein') || recipe.protein >= 20));
+  const onlyFavorites = catalogue.filters.has('favorites') && catalogue.filters.size === 1 && !catalogue.query && !catalogue.taste;
   document.getElementById('result-count').textContent = found.length + (found.length === 1 ? ' recept' : ' recepten');
   result.innerHTML = found.length ? found.map(recipeCard).join('') :
-    empty(catalogue.filter === 'favorites' && !catalogue.query ? 'Nog geen favorieten' : 'Geen recepten gevonden',
-      catalogue.filter === 'favorites' && !catalogue.query ? 'Tik op een hartje om een recept te bewaren.' : 'Pas je zoekterm of filter aan.');
+    empty(onlyFavorites ? 'Nog geen favorieten' : 'Geen recepten gevonden',
+      onlyFavorites ? 'Tik op een hartje om een recept te bewaren.' : 'Probeer een andere zoekterm of filter.',
+      button('reset-search', 'Toon alle recepten'));
 }
 
 function recipeView() {
@@ -232,27 +259,34 @@ function recipeView() {
   const nutrition = scaleNutrition(recipe, n);
   const inList = db.grocery.recipes[recipe.id] ?? 0;
   const measurements = recipe.ingredients.map(item => formatIngredient(item, n));
-  return `<a href="${escapeHtml(recipeBack)}" class="back">${icon('back')} Terug</a>
+  const back = recipeVisit?.back ?? '#recipes';
+  const backLabel = { home: 'Vandaag', recipes: 'Recepten', grocery: 'Boodschappen', agenda: 'Agenda', food: 'Sportvoeding' }[back.split('/')[0].slice(1)] ?? 'Recepten';
+  const plan = recipeVisit?.plan && planById(recipeVisit.plan);
+  return `<a href="${escapeHtml(back)}" class="back" data-recipe-back>${icon('back')} ${backLabel}</a>
     <div class="detail-top">${photo(recipe, { priority: true })}
       <div class="detail-copy"><div class="detail-tags"><span class="badge">${cap(recipe.taste)}</span>
       <span>${icon('clock')} ${recipe.minutes} min</span></div>
       <h1>${escapeHtml(recipe.name)}</h1>${favourite(recipe)}</div></div>
+    <div class="jump-links" role="group" aria-label="In dit recept">
+      ${[['ingredients', 'Ingrediënten'], ['preparation', 'Bereiding'], ['nutrition', 'Voedingswaarden']].map(([id, title]) =>
+        button('jump', title, `data-id="${id}"`, 'jump')).join('')}
+    </div>
     <div class="detail-grid">
-      <section class="panel">
-        <div class="section-head"><h2>Ingrediënten</h2><div class="stepper" aria-label="Porties">
+      <section class="panel" id="ingredients" tabindex="-1">
+        <div class="section-head"><h2>Ingrediënten</h2><div class="stepper" role="group" aria-label="Porties">
           ${button('portion', icon('minus'), `data-id="${recipe.id}" data-n="-0.5" aria-label="Halve portie minder"${disabled(n <= .5)}`)}
           <output aria-live="polite">${formatPortions(n)}</output>
           ${button('portion', icon('plus'), `data-id="${recipe.id}" data-n="0.5" aria-label="Halve portie meer"${disabled(n >= maxPortions)}`)}
         </div></div>
         <ul class="ingredient-list">${measurements.map(({ name, amount }) =>
           `<li><span>${escapeHtml(cap(name))}</span><strong>${escapeHtml(amount || 'Naar smaak')}</strong></li>`).join('')}</ul>
-        ${button('grocery-add', icon('basket') + ' Voeg toe aan boodschappen', `data-id="${recipe.id}" data-n="${n}"${disabled(inList + n > maxPortions)}`, 'primary')}
+        ${button('grocery-add', icon('basket') + ' Voeg toe aan boodschappen', `data-id="${recipe.id}" data-n="${n}"${disabled(inList + n > maxPortions)}`, 'primary ingredient-action')}
         ${inList ? `<p class="note"><a href="#grocery">${formatPortions(inList)} op je boodschappenlijst</a>${inList + n > maxPortions ? ' · maximaal 12 porties per recept' : ''}</p>` : ''}
-        ${recipePlanContext && planById(recipePlanContext.id) ? `<div class="button-row head-actions">
-          ${button('save-recipe-pick', recipePlanContext.phase === 'pre' ? 'Bewaar als snack vooraf' : 'Bewaar als snack achteraf',
-            `data-id="${recipePlanContext.id}" data-phase="${recipePlanContext.phase}" data-n="${recipe.id}" data-portions="${n}"`)}</div>` : ''}
+        ${plan ? `<div class="button-row head-actions">
+          ${button('save-recipe-pick', recipeVisit.phase === 'pre' ? 'Bewaar als snack vooraf' : 'Bewaar als snack achteraf',
+            `data-id="${plan.id}" data-phase="${recipeVisit.phase}" data-n="${recipe.id}" data-portions="${n}"`)}</div>` : ''}
       </section>
-      <section class="panel">
+      <section class="panel" id="preparation" tabindex="-1">
         <h2>Bereiding</h2>
         <ol class="steps">${recipe.steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
         <p class="note">${recipe.allergens.length ? 'Op basis van de ingrediënten: ' + escapeHtml(recipe.allergens.join(', ')) + '. ' : ''}${allergenNote}</p>
@@ -261,7 +295,7 @@ function recipeView() {
         </select></label>
       </section>
     </div>
-    <section class="panel block"><h2>Voedingswaarden</h2><div class="nutrition">
+    <section class="panel block" id="nutrition" tabindex="-1"><h2>Voedingswaarden</h2><div class="nutrition">
       ${[['kcal', 'kcal'], ['protein', 'eiwit'], ['carbs', 'koolhydraten'], ['fat', 'vet'], ['fiber', 'vezels']].map(([key, label]) =>
         `<div><strong>${formatNumber(nutrition[key])}${key !== 'kcal' ? ' g' : ''}</strong><small>${label}</small></div>`).join('')}
     </div><p class="note">${nutritionNote}</p></section>`;
@@ -272,21 +306,25 @@ function grocery() {
   const remaining = rows.filter(item => !item.checked);
   const visible = groceryView === 'open' ? remaining : rows;
   const sources = Object.entries(db.grocery.recipes);
-  return heading('Boodschappen', rows.length ? `${rows.length - remaining.length} van ${rows.length} afgevinkt` : 'Voeg ingrediënten toe vanuit een recept of schrijf zelf iets op.') +
-    `<div class="shop-grid"><section class="panel">
+  const bought = rows.length - remaining.length;
+  return heading('Boodschappen') +
+    `<div class="shop-grid"><section class="panel shop-panel" aria-label="Boodschappen toevoegen en filteren">
       <form id="grocery-form" class="grocery-form">
-        <label class="field"><span>Product toevoegen</span><input name="name" placeholder="Bijv. halfvolle melk" required maxlength="120"></label>
-        <label class="field"><span>Categorie</span><select name="group">${options(groceryGroups.map(x => [x, x]), 'Overig')}</select></label>
+        <label class="field"><span>Product toevoegen</span><input name="name" placeholder="Bijv. halfvolle melk" value="${escapeHtml(groceryDraft.name)}" required maxlength="120"></label>
+        <label class="field"><span>Categorie</span><select name="group">${options(groceryGroups.map(x => [x, x]), groceryDraft.group)}</select></label>
         <button class="button primary" type="submit">${icon('plus')} Toevoegen</button>
       </form>
-      ${rows.length ? `<div class="shop-tools">
-        ${button('shop-filter', groceryView === 'open' ? 'Toon ook afgevinkt' : 'Toon alleen open')}
-        ${button('share', 'Deel open lijst', disabled(!remaining.length))}
+      ${rows.length ? `<div class="shopping-progress">
+        <label for="shop-progress">${bought} van ${rows.length} afgevinkt</label>
+        <progress id="shop-progress" value="${bought}" max="${rows.length}"></progress>
+      </div><div class="shop-tools">
+        ${segments('shop-filter', 'Getoonde boodschappen', [['open', 'Open'], ['all', 'Alles']], groceryView)}
+        ${button('share', icon('share') + ' Deel open lijst', disabled(!remaining.length), 'share-button')}
       </div>` : ''}
-      ${visible.length ? groceryGroups.map(group => groupRows(group, visible)).join('') :
-        empty(rows.length ? 'Alles afgevinkt' : 'Je lijst is leeg', rows.length ? 'Je hebt alle producten gehaald.' : 'Ingrediënten uit recepten komen hier bij elkaar.')}</section>
-      <section class="panel source-panel"><h2>Recepten op je lijst</h2>
-        ${sources.length ? sources.map(([id, n]) => {
+      </section>
+      ${sources.length ? `<details class="panel source-panel" id="grocery-sources" data-keep-open>
+        <summary><span>${icon('book')} Recepten op je lijst</span><span class="source-count">${sources.length}</span>${icon('down', 'toggle-icon')}</summary>
+        ${sources.map(([id, n]) => {
           const recipe = byId.get(Number(id));
           return `<div class="source"><a href="#recipe/${id}" data-recipe-link>${escapeHtml(recipe.name)}</a>
             <div class="source-controls">
@@ -295,8 +333,13 @@ function grocery() {
               </select></label>
               ${button('grocery-remove', 'Verwijder', `data-id="${id}" aria-label="Verwijder ${escapeHtml(recipe.name)} uit boodschappen"`, 'text-button')}
             </div></div>`;
-        }).join('') : `<p class="note">Voeg een recept toe om hier de porties aan te passen.</p><a href="#recipes">Naar recepten</a>`}
-      </section></div>`;
+        }).join('')}
+      </details>` : ''}
+      <section class="grocery-list${visible.length ? ' panel' : ''}" aria-label="Boodschappenlijst">
+      ${visible.length ? groceryGroups.map(group => groupRows(group, visible)).join('') :
+        empty(rows.length ? 'Alles afgevinkt' : 'Je lijst is leeg', rows.length ? 'Tik op Alles om je volledige lijst te bekijken.' : 'Voeg hierboven een product toe of kies ingrediënten uit een recept.',
+          rows.length ? '' : primaryLink('#recipes', 'Bekijk recepten', 'book'))}</section>
+    </div>`;
 }
 
 function groupRows(group, rows) {
@@ -313,7 +356,7 @@ function groupRows(group, rows) {
 function planCard(plan) {
   const times = timing(plan);
   return `<article class="panel plan-card">
-    <div class="plan-top"><div><p class="date-label">${cap(dateLabel(plan.date))} · ${plan.time}</p>
+    <div class="plan-top"><span class="plan-icon">${icon('calendar')}</span><div><p class="date-label">${cap(dateLabel(plan.date))} · ${plan.time}</p>
       <h3>${escapeHtml(plan.sport)}</h3></div>${plan.done ? '<span class="badge">Afgerond</span>' : ''}</div>
     <p class="muted">${plan.duration} min · ${plan.intensity}${plan.groups.length ? ' · ' + escapeHtml(plan.groups.join(', ')) : ''}</p>
     <div class="plan-snacks">${phases.filter(([key]) => plan[key + 'Enabled']).map(([key, title]) => {
@@ -323,24 +366,31 @@ function planCard(plan) {
       return `<div><small>${title} · ${formatTime(times[key])}</small>
         ${recipe ? `<a href="#recipe/${pick.i}" data-recipe-link data-portions="${pick.n}" data-plan="${plan.id}" data-phase="${key}">${escapeHtml(name)}</a>` : `<span>${name}</span>`}</div>`;
     }).join('')}</div>
-    <div class="button-row">
+    <div class="plan-actions">
       ${primaryLink('#food/' + plan.id, 'Sportvoeding', 'bolt')}
-      <a class="button" href="#edit/${plan.id}">Aanpassen</a>
-      ${button('plan-toggle', plan.done ? 'Heropen' : 'Afronden', `data-id="${plan.id}"`, 'text-button')}
-      ${button('plan-remove', 'Verwijder', `data-id="${plan.id}" aria-label="Verwijder training ${escapeHtml(plan.sport)}"`, 'text-button danger')}
-    </div></article>`;
+      <a class="button" href="#edit/${plan.id}" data-edit-link>Aanpassen</a>
+    </div>
+    <details class="plan-options" id="options-${plan.id}" data-keep-open>
+      <summary>${icon('more')} Meer opties ${icon('down', 'toggle-icon')}</summary>
+      <div class="button-row">
+        ${button('plan-toggle', plan.done ? 'Heropen' : 'Afronden', `data-id="${plan.id}"`)}
+        ${button('plan-remove', 'Verwijder', `data-id="${plan.id}" aria-label="Verwijder training ${escapeHtml(plan.sport)}"`, 'text-button danger')}
+      </div>
+    </details></article>`;
 }
 
 function agenda() {
   const plans = sortedPlans();
-  const upcoming = plans.filter(plan => plan.date >= localDate() && !plan.done);
+  const upcoming = plans.filter(upcomingPlan);
   const other = plans.filter(plan => !upcoming.includes(plan)).reverse();
-  return heading('Agenda', 'Plan je trainingen en bewaar je snackkeuzes.') +
-    `<div class="button-row head-actions">${primaryLink('#edit', 'Training plannen', 'plus')}
-      ${plans.length ? '<a class="button" href="#food">Sportvoeding bekijken</a>' : ''}</div>
-    <section class="block">${section('Gepland')}
-      ${upcoming.length ? upcoming.map(planCard).join('') : empty('Geen komende trainingen', 'Nieuwe trainingen verschijnen hier.')}</section>
-    ${other.length ? `<section class="block">${section('Geschiedenis')}${other.map(planCard).join('')}</section>` : ''}`;
+  const history = agendaView === 'history';
+  const visible = history ? other : upcoming;
+  return `<div class="page-heading with-action"><h1>Agenda</h1><a class="button primary" href="#edit" data-edit-link>${icon('plus')} Training plannen</a></div>
+    ${segments('agenda-filter', 'Getoonde trainingen', [['upcoming', `Gepland (${upcoming.length})`], ['history', `Geschiedenis (${other.length})`]], agendaView)}
+    <section class="agenda-list" aria-label="${history ? 'Geschiedenis' : 'Geplande trainingen'}">
+      ${visible.length ? visible.map(planCard).join('') : history ?
+        empty('Nog geen trainingsgeschiedenis', 'Afgelopen en afgeronde trainingen verschijnen hier.') :
+        empty('Geen komende trainingen', 'Voeg een training toe en kies je snacks vóór en na inspanning.')}</section>`;
 }
 
 function edit() {
@@ -348,10 +398,12 @@ function edit() {
   if (current.id && !old) return heading('Training aanpassen') + empty('Training niet gevonden', 'Open een bestaande training vanuit je agenda.', primaryLink('#agenda', 'Naar agenda'));
   const p = old ?? newPlan();
   const pairs = values => values.map(value => [value, value]);
-  const back = old ? '#food/' + old.id : '#agenda';
+  const editVisit = history.state?.snacklabEdit;
+  const back = editVisit ?? (old ? '#food/' + old.id : '#agenda');
+  const backLabel = back === '#home' ? 'Vandaag' : back.startsWith('#food') ? 'Sportvoeding' : 'Agenda';
   const field = (name, title, type, attrs = '') => `<label class="field"><span>${title}</span><input name="${name}" type="${type}" required value="${escapeHtml(p[name])}" ${attrs}></label>`;
   const select = (name, title, values) => `<label class="field"><span id="label-${name}">${title}</span><select name="${name}" aria-labelledby="label-${name}">${options(pairs(values), p[name])}</select></label>`;
-  return `<a class="back" href="${back}">${icon('back')} Terug</a>${heading(old ? 'Training aanpassen' : 'Training plannen')}
+  return `<a class="back" href="${escapeHtml(back)}" data-edit-back>${icon('back')} ${backLabel}</a>${heading(old ? 'Training aanpassen' : 'Training plannen')}
     <form id="plan-form" class="stack" data-id="${p.id}">
       <section class="panel"><h2>Training</h2><div class="fields">
         ${field('date', 'Datum', 'date', 'min="0001-01-01" max="9999-12-31"')}${field('time', 'Starttijd', 'time')}
@@ -372,7 +424,7 @@ function edit() {
           <div id="post-time" ${p.postEnabled ? '' : 'hidden'}>${field('delay', 'Minuten na het einde', 'number', `min="0" max="240"${disabled(!p.postEnabled)}`)}${box('nextMeal', 'Volledige maaltijd binnen een uur na afloop', p.nextMeal)}</div>
         </div></div>
         <p id="form-error" class="error" role="alert" hidden></p>
-        <div class="button-row head-actions"><button class="button primary" type="submit">Opslaan en snacks kiezen</button><a href="${back}" class="button">Annuleren</a></div>
+        <div class="button-row head-actions"><button class="button primary" type="submit">Opslaan en snacks kiezen</button><a href="${escapeHtml(back)}" class="button" data-edit-back>Annuleren</a></div>
       </section></form>`;
 }
 
@@ -381,28 +433,32 @@ function food() {
   const today = localDate();
   const plan = planById(current.id) ?? planById(activePlan) ?? all.find(p => !p.done && p.date >= today) ?? all.at(-1);
   if (!plan) return heading('Sportvoeding') + empty('Nog geen training gepland', 'Je snackopties verschijnen zodra je een training plant.', primaryLink('#edit', 'Training plannen', 'plus'));
+  if (activePlan !== plan.id) foodPhase = 'pre';
   activePlan = plan.id;
   const advice = sportAdvice(plan, db);
+  const moments = phases.filter(([phase]) => plan[phase + 'Enabled']);
+  const visible = moments.some(([phase]) => phase === foodPhase) ? foodPhase : moments[0]?.[0];
   const source = 'https://www.voedingscentrum.nl/nl/thema/eten-bij-sport-en-beweging/planning-eten-en-drinken-rond-sportmomenten.aspx';
   return `<a href="#agenda" class="back">${icon('back')} Agenda</a>${heading('Sportvoeding')}
-    <section class="panel">
+    <section class="panel training-summary">
       <label class="field"><span id="label-food-plan">Training</span><select id="food-plan" aria-labelledby="label-food-plan">
         ${options(all.map(p => [p.id, cap(dateLabel(p.date)) + ' · ' + p.time + ' · ' + p.sport]), plan.id)}
       </select></label>
       <p class="note">${formatTime(advice.times.start)} tot ${formatTime(advice.times.end)} · ${plan.duration} min · ${plan.intensity}
         <br>Laatste maaltijd om ${formatTime(advice.times.meal)} · ${plan.size.toLowerCase()}</p>
-      <a class="button" href="#edit/${plan.id}">Timing aanpassen</a>
+      <a class="button text-button" href="#edit/${plan.id}" data-edit-link>Timing aanpassen</a>
     </section>
     <div class="advice-grid">
-      ${plan.preEnabled ? adviceSection(plan, advice, 'pre') : ''}
-      ${plan.postEnabled ? adviceSection(plan, advice, 'post') : ''}
-      ${!plan.preEnabled && !plan.postEnabled ? empty('Snackmomenten staan uit', 'Je kunt vooraf en achteraf apart aanzetten.', primaryLink('#edit/' + plan.id, 'Timing aanpassen')) : ''}
+      ${moments.length > 1 ? segments('food-phase', 'Snackmoment', moments.map(([phase, title]) => [phase,
+        `<span>${title}${plan[phase + 'Pick'] ? icon('check') : ''}</span><small>${formatTime(advice.times[phase])}</small>`]), visible) : ''}
+      ${visible ? adviceSection(plan, advice, visible) :
+        empty('Snackmomenten staan uit', 'Je kunt vooraf en achteraf apart aanzetten.', primaryLink('#edit/' + plan.id, 'Timing aanpassen'))}
     </div>
-    <section class="panel block"><h2>Drinken tijdens het sporten</h2><p>Neem water mee en drink naar behoefte. ${plan.hot ?
+    <details class="panel hydration" id="hydration" data-keep-open><summary>Drinken tijdens het sporten ${icon('down', 'toggle-icon')}</summary><p>Neem water mee en drink naar behoefte. ${plan.hot ?
       'Plan drinkpauzes en pas de hoeveelheid aan hoeveel je zweet.' : 'Bij een korte of rustige training is water doorgaans voldoende.'}</p>
     ${advice.long ? '<p>Bij langdurige, intensieve inspanning kunnen koolhydraten tijdens het sporten nuttig zijn. Hoeveel je verdraagt hangt af van je inspanning en wat je gewend bent.</p>' : ''}
     <p class="note">Dit zijn algemene snackopties. Voedingswaarden zijn schattingen. <a href="${source}" target="_blank" rel="noopener">Voedingscentrum</a></p>
-    <p class="note">${allergenNote}</p></section>`;
+    <p class="note">${allergenNote}</p></details>`;
 }
 
 function adviceSection(plan, advice, phase) {
@@ -419,12 +475,18 @@ function adviceSection(plan, advice, phase) {
   const ranked = advice[phase];
   const selectedSnack = active?.i >= 0 ? ranked.find(item => item.i === active.i) : null;
   const top = ranked.filter(item => item.i !== selectedSnack?.i);
-  return `<section class="block advice-section"><div class="section-head"><h2>${title}</h2><span class="badge">${formatTime(advice.times[phase])}</span></div>
-    <p class="muted">${text}</p>
-    ${foodChoice(plan, phase, { i: -1, n: 0, reason: 'Sla dit snackmoment over.' })}
+  const skip = foodChoice(plan, phase, { i: -1, n: 0, reason: '' });
+  const suggestSkip = active?.i === -1 || (!selectedSnack && (pre ? advice.preOptional : advice.postOptional));
+  return `<section class="advice-section"><div class="section-head"><h2>${title}</h2><span class="badge">${formatTime(advice.times[phase])}</span></div>
+    <p class="muted advice-note">${text}</p>
     ${selectedSnack ? foodChoice(plan, phase, { ...selectedSnack, n: active.n, reason: 'Je bewaarde portie.' }) : ''}
+    ${suggestSkip ? skip : ''}
     ${top.slice(0, 3).map(item => foodChoice(plan, phase, item)).join('')}
-    <details class="panel more-advice"><summary>Meer snackopties</summary>${top.slice(3).map(item => foodChoice(plan, phase, item)).join('')}</details></section>`;
+    <details class="panel more-advice" id="advice-${plan.id}-${phase}" data-keep-open>
+      <summary>Meer snackopties ${icon('down', 'toggle-icon')}</summary>
+      ${top.slice(3).map(item => foodChoice(plan, phase, item)).join('')}</details>
+    ${suggestSkip ? '' : skip}
+  </section>`;
 }
 
 function foodChoice(plan, phase, option) {
@@ -433,10 +495,13 @@ function foodChoice(plan, phase, option) {
   const attrs = `data-id="${plan.id}" data-phase="${phase}" data-n="${i}" data-portions="${n}" aria-pressed="${chosen}"`;
   const nutrition = recipe ? scaleNutrition(recipe, n) : null;
   const inList = recipe ? db.grocery.recipes[recipe.id] ?? 0 : 0;
-  return `<article class="food-choice${chosen ? ' chosen' : ''}">
+  return `<article class="food-choice${chosen ? ' chosen' : ''}${recipe ? '' : ' skip-snack'}" tabindex="-1">
+    ${recipe ? photo(recipe, { cls: 'choice-image' }) : ''}
+    <div class="choice-copy">
     <h3>${recipe ? `<a href="#recipe/${i}" data-recipe-link data-portions="${n}" data-plan="${plan.id}" data-phase="${phase}">${escapeHtml(recipe.name)}</a>` : 'Geen extra snack'}</h3>
     ${recipe ? `<p><strong>${formatPortions(n)}</strong> · ±${formatNumber(nutrition.kcal)} kcal · ${formatNumber(nutrition.carbs)} g KH · ${formatNumber(nutrition.protein)} g eiwit</p>` : ''}
-    <p class="note">${reason}</p>
+    ${reason ? `<p class="note">${reason}</p>` : ''}
+    </div>
     <div class="button-row">
       ${button('food-pick', chosen ? icon('check') + ' Gekozen' : recipe ? 'Kies snack' : 'Kies geen snack', attrs + disabled(chosen))}
       ${recipe && chosen ? button('grocery-add', icon('basket') + ' Naar boodschappen', `data-id="${i}" data-phase="${phase}" data-n="${n}"${disabled(inList + n > maxPortions)}`) : ''}
@@ -451,8 +516,8 @@ function profile() {
     recovered = localStorage.getItem(restoreKey) !== null;
     legacy = localStorage.getItem(legacyKey) !== null;
   } catch { /* The status message above gives the recovery path. */ }
-  return heading('Profiel', 'Beheer je smaakvoorkeuren, gegevens en installatie.') +
-    `<div class="detail-grid">
+  return heading('Profiel') +
+    `<div class="detail-grid profile-grid">
       <section class="panel"><h2>Mijn smaak</h2>
         <div class="fields">
           <label class="field"><span>Voorkeur voor smaak</span><select id="taste">
@@ -463,7 +528,7 @@ function profile() {
           </select></label>
         </div>
         <p class="note">Je voorkeuren, favorieten en sterren bepalen wat hoger staat bij ‘Voor jou’.</p>
-        <p class="note">${db.favorites.length} ${db.favorites.length === 1 ? 'favoriet' : 'favorieten'} · ${Object.values(db.ratings).filter(n => n > 0).length} beoordeeld</p>
+        <a class="profile-favorites" href="#recipes/favorites">${icon('heart')} ${db.favorites.length} ${db.favorites.length === 1 ? 'favoriet' : 'favorieten'}</a>
         ${box('sensitive', 'Gevoelige maag tijdens sporten', db.sensitive)}
         <p class="note">Bij een kort tijdsvenster krijgt een kleine, lichtere portie voorrang.</p>
       </section>
@@ -478,11 +543,14 @@ function profile() {
         <label class="field import"><span>Back-up herstellen</span><input type="file" id="backup-file" accept="application/json,.json"></label>
         <p class="note">Herstellen vervangt je huidige gegevens na bevestiging. Download eerst een back-up van deze versie als je die wilt bewaren.</p>
       </section>
-      <section class="panel"><h2>Op je iPhone installeren</h2>
+      <details class="panel profile-details" id="install-help" data-keep-open>
+        <summary>Op je iPhone installeren ${icon('down', 'toggle-icon')}</summary>
         <ol class="steps"><li>Open SnackLab in Safari.</li><li>Tik op Deel en kies ‘Zet op beginscherm’.</li><li>Zet ‘Open als webapp’ aan en tik op ‘Voeg toe’.</li></ol>
         <p id="offline-status" class="note" aria-live="polite">${navigator.serviceWorker?.controller ? 'Offline cache is actief.' : 'Open SnackLab online om offline gebruik voor te bereiden.'}</p>
-      </section>
-      <section class="panel"><h2>Ingrediënten & allergenen</h2><p>${allergenNote}</p><p class="note">${nutritionNote}</p></section>
+      </details>
+      <details class="panel profile-details" id="allergen-help" data-keep-open>
+        <summary>Ingrediënten & allergenen ${icon('down', 'toggle-icon')}</summary><p>${allergenNote}</p><p class="note">${nutritionNote}</p>
+      </details>
     </div>`;
 }
 
@@ -549,36 +617,91 @@ async function share() {
   shared.select();
 }
 
-function redraw(options) {
-  const open = [...main.querySelectorAll('.more-advice')].map(item => item.open);
-  render(options);
+function openPanels() {
+  return [...main.querySelectorAll('details[data-keep-open][open]')].map(item => item.id);
+}
+
+function redraw({ focus = false, returnVisit, actionFocus } = {}) {
+  const open = new Set(returnVisit?.panels ?? (focus ? [] : openPanels()));
+  render();
   catalogueResults();
-  if (!options?.focus) [...main.querySelectorAll('.more-advice')].forEach((item, index) => {
-    item.open = open[index] ?? false;
-  });
-  if (!options?.focus && options?.actionFocus && current.name === 'recipes') {
-    const data = options.actionFocus;
-    const focus = [...main.querySelectorAll('button[data-action]')].find(el => el.dataset.action === data.action && el.dataset.id === data.id);
-    (focus ?? main.querySelector('#recipe-search'))?.focus({ preventScroll: true });
+  for (const item of main.querySelectorAll('details[data-keep-open]')) item.open = open.has(item.id);
+  if (focus) {
+    const source = returnVisit && [...main.querySelectorAll('a[data-recipe-link]')].find(link =>
+      link.hash === '#recipe/' + returnVisit.recipeId &&
+      (!returnVisit.plan || (link.dataset.plan === returnVisit.plan && link.dataset.phase === returnVisit.phase)));
+    scrollTo(0, returnVisit?.scroll ?? 0);
+    (source ?? main).focus({ preventScroll: true });
+    return;
+  }
+  if (actionFocus) {
+    const { action, id, phase, n, key } = actionFocus;
+    const buttons = [...main.querySelectorAll('button[data-action]:enabled')];
+    const target = buttons.find(({ dataset: d }) =>
+      d.action === action && d.id === id && d.phase === phase && d.n === n && d.key === key)
+      ?? (action === 'portion' ? buttons.find(el => el.dataset.action === 'portion') : null)
+      ?? (action === 'food-pick' ? main.querySelector('.food-choice.chosen') : null)
+      ?? (current.name === 'recipes' ? main.querySelector('#recipe-search') : null);
+    target?.focus({ preventScroll: action !== 'food-pick' });
   }
 }
 
 function syncRoute() {
   if (location.hash === '#main') return;
+  const lastVisit = recipeVisit;
   current = route();
-  if (current.id !== recipePlanContext?.recipeId) recipePlanContext = undefined;
+  const visit = history.state?.snacklabRecipe;
+  recipeVisit = current.name === 'recipe' && visit?.recipeId === current.id ? visit : undefined;
+  if (recipeVisit?.portions && portions[current.id] === undefined) portions[current.id] = recipeVisit.portions;
+  if (current.name === 'recipes' && ['quick', 'favorites'].includes(current.id)) {
+    resetSearch();
+    catalogue.filters.add(current.id);
+    current.id = undefined;
+    history.replaceState(null, '', '#recipes');
+  }
   if (initialized && !issues.write) refreshState();
-  redraw({ focus: initialized });
+  const target = location.hash || '#home';
+  redraw({ focus: initialized, returnVisit: lastVisit?.back === target ? lastVisit : undefined });
   initialized = true;
+}
+
+function resetSearch() {
+  catalogue.query = '';
+  catalogue.taste = '';
+  catalogue.filters.clear();
 }
 
 main.addEventListener('click', event => {
   const link = event.target.closest('a[data-recipe-link]');
-  if (link) {
-    recipeBack = location.hash || (current.name === 'home' ? '#home' : '#recipes');
+  const navigate = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+  if (link && navigate) {
+    event.preventDefault();
     const recipeId = Number(link.hash.split('/')[1]);
     if (link.dataset.portions) portions[recipeId] = Number(link.dataset.portions);
-    recipePlanContext = link.dataset.plan ? { recipeId, id: link.dataset.plan, phase: link.dataset.phase } : undefined;
+    const visit = {
+      recipeId, back: location.hash || '#home', scroll: scrollY, panels: openPanels(), plan: link.dataset.plan,
+      phase: link.dataset.phase, portions: portions[recipeId]
+    };
+    history.pushState({ snacklabRecipe: visit }, '', link.hash);
+    syncRoute();
+    return;
+  }
+  if (recipeVisit && navigate && event.target.closest('a[data-recipe-back]')) {
+    event.preventDefault();
+    history.back();
+    return;
+  }
+  const editLink = event.target.closest('a[data-edit-link]');
+  if (navigate && editLink) {
+    event.preventDefault();
+    history.pushState({ snacklabEdit: location.hash || '#home' }, '', editLink.hash);
+    syncRoute();
+    return;
+  }
+  if (navigate && history.state?.snacklabEdit && event.target.closest('a[data-edit-back]')) {
+    event.preventDefault();
+    history.back();
+    return;
   }
   const control = event.target.closest('button[data-action]');
   if (!control) return;
@@ -594,7 +717,35 @@ main.addEventListener('click', event => {
       });
       break;
     case 'filter':
-      catalogue.filter = id;
+      if (id === 'all') {
+        catalogue.taste = '';
+        catalogue.filters.clear();
+      } else if (id === 'hartig' || id === 'zoet') catalogue.taste = catalogue.taste === id ? '' : id;
+      else if (catalogue.filters.has(id)) catalogue.filters.delete(id);
+      else catalogue.filters.add(id);
+      break;
+    case 'clear-query': {
+      const search = main.querySelector('#recipe-search');
+      search.value = catalogue.query = '';
+      control.hidden = true;
+      catalogueResults();
+      search.focus();
+      return;
+    }
+    case 'reset-search':
+      resetSearch();
+      break;
+    case 'jump': {
+      const target = document.getElementById(id);
+      target.scrollIntoView({ block: 'start' });
+      target.focus({ preventScroll: true });
+      return;
+    }
+    case 'food-phase':
+      foodPhase = id;
+      break;
+    case 'agenda-filter':
+      agendaView = id;
       break;
     case 'portion':
       portions[recipeId] = Math.min(maxPortions, Math.max(.5, (portions[recipeId] ?? 1) + amount));
@@ -619,7 +770,7 @@ main.addEventListener('click', event => {
       }, 'Product verwijderd.');
       break;
     case 'shop-filter':
-      groceryView = groceryView === 'open' ? 'all' : 'open';
+      groceryView = id;
       break;
     case 'share':
       void share();
@@ -629,6 +780,7 @@ main.addEventListener('click', event => {
         const plan = state.plans.find(item => item.id === id);
         if (!plan) return false;
         plan.done = !plan.done;
+        if (current.name === 'agenda') agendaView = upcomingPlan(plan) ? 'upcoming' : 'history';
       });
       break;
     case 'plan-remove':
@@ -643,7 +795,10 @@ main.addEventListener('click', event => {
         plan[phase + 'Pick'] = { i: amount, n: Number(control.dataset.portions) };
       }, 'Snackkeuze opgeslagen.');
       if (changed && action === 'save-recipe-pick') {
-        go('#food/' + id);
+        activePlan = id;
+        foodPhase = phase;
+        if (recipeVisit?.back === '#food/' + id) history.back();
+        else go('#food/' + id);
         return;
       }
       break;
@@ -669,9 +824,13 @@ main.addEventListener('click', event => {
 });
 
 main.addEventListener('input', event => {
-  if (event.target.id !== 'recipe-search') return;
-  catalogue.query = event.target.value;
-  catalogueResults();
+  const input = event.target;
+  if (input.id === 'recipe-search') {
+    catalogue.query = input.value;
+    main.querySelector('.search-clear').hidden = !catalogue.query;
+    catalogueResults();
+  }
+  if (input.form?.id === 'grocery-form' && input.name === 'name') groceryDraft.name = input.value;
 });
 
 main.addEventListener('change', event => {
@@ -683,6 +842,8 @@ main.addEventListener('change', event => {
     update(state => { state.ratings[current.id] = Number(input.value); }, 'Beoordeling opgeslagen.');
   } else if (input.id === 'food-plan') {
     go('#food/' + input.value);
+  } else if (input.form?.id === 'grocery-form' && input.name === 'group') {
+    groceryDraft.group = input.value;
   } else if (input.id === 'taste' || input.id === 'texture') {
     update(state => { state.preferences[input.id] = input.value; }, 'Voorkeur opgeslagen.');
   } else if (input.name === 'sensitive') {
@@ -697,13 +858,15 @@ main.addEventListener('change', event => {
     [...main.querySelectorAll('.source-portions')].find(el => el.dataset.id === input.dataset.id)?.focus({ preventScroll: true });
   } else if (input.classList.contains('grocery-check')) {
     const { key } = input.dataset;
+    const index = [...main.querySelectorAll('.grocery-check')].indexOf(input);
     update(state => {
       if (input.checked) state.grocery.checked[key] = true;
       else delete state.grocery.checked[key];
     });
     redraw();
-    const target = [...main.querySelectorAll('.grocery-check')].find(el => el.dataset.key === key) ??
-      main.querySelector('.grocery-check') ?? main.querySelector('button[data-action="shop-filter"]');
+    const checks = [...main.querySelectorAll('.grocery-check')];
+    const target = checks.find(el => el.dataset.key === key) ?? checks[Math.min(index, checks.length - 1)] ??
+      main.querySelector('button[data-action="shop-filter"]');
     target?.focus({ preventScroll: true });
   } else if (input.name === 'sport') {
     document.querySelector('#groups').hidden = input.value !== 'Krachttraining';
@@ -727,6 +890,7 @@ main.addEventListener('submit', event => {
       return;
     }
     if (update(state => { state.grocery.manual.push({ id: newId(), name, group: values.get('group') }); }, 'Product toegevoegd.')) {
+      groceryDraft.name = '';
       redraw();
       formFocus('grocery-form', 'name');
     }
@@ -760,13 +924,17 @@ main.addEventListener('submit', event => {
     else state.plans.push(plan);
     return true;
   }, 'Training opgeslagen.');
-  if (validated) go('#food/' + id);
+  if (validated) {
+    if (!current.id) foodPhase = 'pre';
+    go('#food/' + id);
+  }
 });
 
 function formFocus(formId, name) {
   document.getElementById(formId)?.elements.namedItem(name)?.focus();
 }
 
+history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', syncRoute);
 window.addEventListener('storage', event => {
   if (event.key !== storageKey && event.key !== null) return;
