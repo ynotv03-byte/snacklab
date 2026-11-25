@@ -1,6 +1,6 @@
 import { formatPortions, localDate, maxPortions, metric } from './core.js';
 import { h } from './screens.js';
-import { dayProduce, entryProduce, loggableProduce, produceGoals, produceGuides, produceProgress } from './vegetables.js';
+import { canLogSnack, dayProduce, entryProduce, produceGoals, produceGuides, produceProgress } from './vegetables.js';
 
 const todayLabel = new Intl.DateTimeFormat('nl-NL', { weekday:'long', day:'numeric', month:'long' });
 const gram = (value,estimated = false) => (estimated ? '≈ ' : '') + metric(value);
@@ -26,7 +26,7 @@ function dayMeters(prefix,produce,detail = false) {
 
 export function produceToday(state) {
   return `<section class="panel veg-today">
-    <div><h2>Groente en fruit vandaag</h2>${dayMeters('home-produce',dayProduce(state.vegetables))}</div>
+    <div><h2>Groente en fruit</h2>${dayMeters('home-produce',dayProduce(state.vegetables))}</div>
     <a class="button" href="#dagmeter">Open dagmeter</a>
   </section>`;
 }
@@ -77,7 +77,6 @@ function portionMeter(kind,produce) {
 export function producePortion(state,recipe,produce) {
   const logged = dayProduce(state.vegetables).entries.filter(entry => entry.recipeId === recipe.id)
     .reduce((sum,entry) => sum + entry.portions,0);
-  const eligible = loggableProduce(produce);
   const partial = produce.vegetable.unknown || produce.fruit.unknown;
   return `<div class="veg-portion produce-portion">
     <div><h3>Groente en fruit in deze portie</h3>
@@ -88,7 +87,7 @@ export function producePortion(state,recipe,produce) {
       ${logged ? `<p class="note">Vandaag bijgehouden · ${formatPortions(logged)}</p>` : ''}
     </div>
     <div class="button-row">
-      ${eligible.grams || eligible.fruitGrams ? `<button class="button primary" type="button" data-action="veg-eaten" data-id="${recipe.id}">Vandaag gegeten</button>` : ''}
+      ${canLogSnack(recipe) ? `<button class="button primary" type="button" data-action="veg-eaten" data-id="${recipe.id}">Vandaag gegeten</button>` : ''}
       <a class="button" href="#dagmeter">Dagmeter</a>
     </div>
   </div>`;
@@ -132,7 +131,7 @@ export function produceLog(state,date) {
       </form>
       ${day.entries.length ? `<ul class="clean-list veg-entries" role="list">${day.entries.map(entry => `<li>
         <form class="veg-entry" data-veg-edit="${entry.id}">
-          <div><strong>${h(entry.name)}</strong><small>${produceCaption(entryProduce(entry),true)}</small></div>
+          <div><strong>${h(entry.name)}</strong><small>${produceCaption(entryProduce(entry),true) || 'Geen groente of fruit meegeteld'}</small></div>
           ${entryContents(entry)}
           <button class="button" type="submit">Bewaar</button>
           <button class="button text-button danger" type="button" data-action="veg-remove" data-id="${entry.id}" aria-label="Verwijder ${h(entry.name)}">Verwijder</button>
@@ -140,7 +139,7 @@ export function produceLog(state,date) {
         </form>
       </li>`).join('')}</ul>` : '<p class="note">Je hebt op deze dag nog niets bijgehouden.</p>'}
     </section>
-    <section class="panel veg-add"><h2>Groente of fruit toevoegen</h2>
+    <section class="panel veg-add" id="produce-add" tabindex="-1"><h2>Groente of fruit toevoegen</h2>
       <p>Voeg bijvoorbeeld een losse appel of de groente bij je avondeten toe. Gebruik het eetbare gewicht.</p>
       <form id="veg-eaten-form" data-date="${date}">
         <label class="field"><span>Maaltijd of product</span><input name="meal" type="text" maxlength="110" placeholder="Bijv. Appel of avondeten"></label>

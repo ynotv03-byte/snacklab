@@ -418,6 +418,19 @@ export function dailyEntries(state, date) {
   return state.weeks[monday(date)]?.entries.filter(entry => entry.date === date) ?? [];
 }
 
+export function dailySnackSlots(state, date) {
+  const week = state.weeks[monday(date)];
+  const linked = new Set(Object.values(state.weeks).flatMap(item =>
+    item.entries.filter(entry => entry.planId).map(sportEntryId)));
+  const choices = state.plans.flatMap(sportSlots).filter(slot => {
+    const removed = week?.removed.some(id => sportSourceFromId(id) === slot.plan.id && id.endsWith(':' + slot.kind));
+    return slot.date === date && slot.pick?.i >= 0 && !linked.has(slot.id) && !removed;
+  }).map(slot => ({ id:slot.id, date, time:slot.time, kind:slot.kind, planId:slot.plan.id,
+    recipeId:slot.pick.i, portions:slot.pick.n, reason:'Snack gekozen bij je training.' }));
+  const planned = dailyEntries(state,date).map(entry => ({...entry, id:sportEntryId(entry), editId:entry.id}));
+  return [...planned, ...choices].sort((a,b) => a.time.localeCompare(b.time));
+}
+
 export const filterTextKeys = ['include','exclude'];
 export const filterFlags = ['favorite','untried','positive','work','pre','post','portable','reviewed','own'];
 export const filterRangeKeys = [...nutrientKeys.flatMap(key => [key + 'Min', key + 'Max']), 'minutesMax'];

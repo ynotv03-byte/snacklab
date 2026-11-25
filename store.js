@@ -7,7 +7,7 @@ import { validateRecipe, validateWork, validateWeek, validateCook, validateFilte
 export const maxOwnRecipes = 100;
 export const maxBackupBytes = 120 * 1024 * 1024;
 const snapshotFormat = 'SnackLab';
-const storageRevision = 1;
+const storageRevision = 2;
 const validKey = value => /^[\w:-]{1,120}$/.test(value);
 
 export function blankSnapshot(base = blankState()) {
@@ -33,7 +33,7 @@ export function validateSnapshot(input) {
       !Array.isArray(input.workProfiles) || input.workProfiles.length > 24 ||
       !Array.isArray(input.filterProfiles) || input.filterProfiles.length > 40 ||
       !isObject(input.weeks) || !isObject(input.cooking)) throw new Error('Deze back-up is geen ondersteunde SnackLab 6-back-up.');
-  if (input.storageRevision !== undefined && input.storageRevision !== storageRevision) {
+  if (![undefined,1,storageRevision].includes(input.storageRevision)) {
     throw new Error('Deze gegevens zijn gemaakt met een nieuwere of onbekende opslagversie van SnackLab.');
   }
   const customRecipes = input.customRecipes.map(validateRecipe);

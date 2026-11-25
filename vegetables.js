@@ -1,4 +1,4 @@
-import { localDate, normalizeText, validDate, validPortions } from './core.js';
+import { hazelnutRisk, localDate, normalizeText, validDate, validPortions } from './core.js';
 
 export const produceGoals = { vegetable: 250, fruit: 200 };
 export const produceGuides = {
@@ -72,6 +72,21 @@ export function loggableProduce(produce) {
     estimated:grams > 0 && produce.vegetable.estimated, fruitEstimated:fruitGrams > 0 && produce.fruit.estimated };
 }
 
+export const canLogSnack = recipe => Boolean(recipe && !recipe.archived && !hazelnutRisk(recipe));
+
+export function recentSnacks(entries, catalogue, date) {
+  const recent = [];
+  const seen = new Set();
+  // Stable sort preserves newest insertion first within each day, including backdated entries.
+  for (const entry of [...entries].reverse().sort((a,b) => b.date.localeCompare(a.date))) {
+    if (entry.date > date || seen.has(entry.recipeId) || !canLogSnack(catalogue.get(entry.recipeId))) continue;
+    seen.add(entry.recipeId);
+    recent.push(entry);
+    if (recent.length === 3) break;
+  }
+  return recent;
+}
+
 export function groceryProduce(grocery, catalogue) {
   const result = totals();
   for (const source of [grocery.recipes, ...Object.values(grocery.weekImports ?? {})]) {
@@ -94,7 +109,7 @@ export function validateProduceEntry(entry) {
   if (!plain(entry) || typeof entry.id !== 'string' || !/^[\w-]{1,90}$/.test(entry.id) || !validDate(entry.date) || !clean(entry.name)) {
     fail('Een regel in het eetlogboek is ongeldig.');
   }
-  const { id,date,recipeId,portions,grams } = entry;
+  const { id,date,recipeId,portions,grams,slotId } = entry;
   const name = clean(entry.name);
   // SnackLab 6.3 stored only the vegetable amount. Preserve those entries verbatim.
   const fruitGrams = entry.fruitGrams === undefined ? 0 : entry.fruitGrams;
@@ -106,10 +121,11 @@ export function validateProduceEntry(entry) {
       fruitGrams:Math.round(fruitGrams * 10) / 10,estimated:false,fruitEstimated:false };
   }
   if (!Number.isSafeInteger(recipeId) || recipeId < 0 || !validPortions(portions) ||
-      !range(grams,0,1e9) || !range(fruitGrams,0,1e9) || Math.max(grams,fruitGrams) < .001) {
+      !range(grams,0,1e9) || !range(fruitGrams,0,1e9) || (slotId !== undefined &&
+        (typeof slotId !== 'string' || !/^[\w:-]{1,120}$/.test(slotId)))) {
     fail('Controleer het aantal porties en de hoeveelheid groente of fruit.');
   }
-  return { id,date,name,recipeId,portions,grams,fruitGrams,
+  return { id,date,name,recipeId,portions,grams,fruitGrams, ...(slotId === undefined ? {} : {slotId}),
     estimated:grams > 0 && entry.estimated === true, fruitEstimated:fruitGrams > 0 && entry.fruitEstimated === true };
 }
 

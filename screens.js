@@ -2,9 +2,9 @@ import { byId, formatIngredient, formatPortions, metric, nutrientKeys, nutrientL
   maxPortions, localDate, sports, intensities, textures, hazelnutRisk } from './core.js';
 import { groceryGroups } from './data.js';
 import { ingredientsLibrary } from './ingredients.js';
-import { recipeProduce, loggableProduce } from './vegetables.js';
+import { recipeProduce, canLogSnack } from './vegetables.js';
 import {
-  addDays, dailyEntries, emptyWeek, monday, moments, practical, secondsLeft, stepMinutes, timerLabel,
+  addDays, emptyWeek, monday, moments, practical, secondsLeft, stepMinutes, timerLabel,
   weekdays, workProfile, workSlots, workoutAfterShift, workSuggestions, nutritionTotal, strategies,
   newRecipe, newWorkProfile, units, allergenOptions, storageOptions, hazelnutOptions, labelCheckText,
   knownRiskText, coldText, filterFlags, workEligible, sportWeekConflict
@@ -57,20 +57,6 @@ export function labelStatus(recipe, state) {
     '<p class="label-status">Etiket nog te controleren</p>';
 }
 
-export function personalToday(state, date) {
-  const profile = workProfile(state, date);
-  const items = dailyEntries(state, date);
-  if (!profile && !items.length) return '';
-  return `<section class="today-plan">
-    <div class="section-head"><h2>Jouw dag</h2><a href="#week/${monday(date)}">Weekplanner</a></div>
-    ${profile ? `<div class="shift-strip"><div><strong>${h(profile.name)}</strong><small>${profile.start}–${profile.end} · ${h(profile.intensity)}${profile.hot ? ' · warm' : ''}</small></div>${link('#work/' + date, 'Werkdag')}</div>` : ''}
-    ${items.length ? `<ul class="day-mini">${items.map(entry => {
-      const recipe = byId.get(entry.recipeId);
-      return `<li><time>${entry.time}</time><span>${recipe ? smallRecipeLink(recipe, entry.portions) : 'Nog te kiezen'}</span></li>`;
-    }).join('')}</ul>` : ''}
-  </section>`;
-}
-
 export function workCopy(state, date) {
   const profile = workProfile(state, date);
   if (!profile) return `<section class="empty"><h2>Geen werkdag</h2><p>Voor ${dateTitle(date)} staat geen terugkerende dienst.</p>${link('#workprofiles', 'Werkprofielen beheren')}</section>`;
@@ -104,7 +90,7 @@ export function workCopy(state, date) {
 }
 
 export function workView(state, date) {
-  return `${back('#agenda', 'Agenda')}${page('Werkdag')}${dayNav(date, 'work')}${workCopy(state,date)}`;
+  return `${back('#agenda', 'Agenda')}${page('Werkdag', workProfile(state,date) ? link('#workprofiles','Werkprofielen') : '')}${dayNav(date, 'work')}${workCopy(state,date)}`;
 }
 
 function dayNav(date, route) {
@@ -366,7 +352,6 @@ export function filterDialog(state, filter) {
 
 export function cookingView(recipe, state, session) {
   const n = session.servings;
-  const produce = loggableProduce(recipeProduce(recipe,n));
   const last = recipe.steps.length - 1;
   const index = Math.min(session.step,last);
   const minutes = stepMinutes(recipe,index);
@@ -389,7 +374,7 @@ export function cookingView(recipe, state, session) {
       ${select('cook-rating','Jouw beoordeling',[[0,'Geen beoordeling'], ...[1,2,3,4,5].map(i=>[i,i+' '+(i===1?'ster':'sterren')])],state.ratings[recipe.id] ?? 0,'data-cook-rating')}
       ${act('cook-favorite',state.favorites.includes(recipe.id) ? 'Favoriet opgeslagen' : 'Bewaar als favoriet',
         `aria-pressed="${state.favorites.includes(recipe.id)}"`)}
-      ${produce.grams || produce.fruitGrams ? `<button type="button" class="button" data-action="veg-eaten" data-id="${recipe.id}">Vandaag gegeten</button>` : ''}
+      ${canLogSnack(recipe) ? `<button type="button" class="button" data-action="veg-eaten" data-id="${recipe.id}">Vandaag gegeten</button>` : ''}
       ${act('cook-reset','Opnieuw koken','', 'text-button')}
     </section>` : index === -1 ? `<section class="panel cook-current">
       <div class="section-head"><h2>Ingrediënten</h2>

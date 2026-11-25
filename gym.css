@@ -162,11 +162,6 @@
 }
 
 
-[data-page="home"] .shortcuts { grid-template-columns: repeat(4,minmax(0,1fr)); }
-@media (max-width: 800px) {
-  [data-page="home"] .shortcuts { grid-template-columns: repeat(2,minmax(0,1fr)); }
-}
-
 .gym-details > summary::after, .gym-tech-inline > summary::after {
   content: '';
   width: .46rem;
