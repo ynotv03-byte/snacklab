@@ -166,10 +166,14 @@ export function workSlots(profile, date) {
   }));
 }
 
+const sportId = (planId, phase) => 'sport:' + planId + ':' + phase;
+const sportSourceFromId = id => /^(?:sport|\d{4}-\d{2}-\d{2}):([\w-]{1,80}):(pre|post)$/.exec(id ?? '')?.[1] ?? null;
+const sportEntryId = entry => entry.planId ? sportId(entry.planId,entry.kind) : entry.id;
+
 function sportSlots(plan) {
   const times = timing(plan);
   return ['pre', 'post'].filter(phase => plan[phase + 'Enabled'] && plan[phase + 'Pick']?.i !== -1).map(phase => ({
-    id: plan.date + ':' + plan.id + ':' + phase, kind: phase, plan, pick: plan[phase + 'Pick'],
+    id: sportId(plan.id,phase), kind: phase, plan, pick: plan[phase + 'Pick'],
     ...timedSlot(plan.date, times[phase])
   }));
 }
@@ -204,7 +208,10 @@ export function validateWeek(input, start, catalogue) {
     if (!isObject(entry) || !idText(entry.id) || !validDate(entry.date) || entry.date < start || entry.date > addDays(start, 6) ||
       !Number.isFinite(parseTime(entry.time)) || !slotKinds.includes(entry.kind) ||
       (entry.recipeId !== null && !catalogue.has(entry.recipeId)) || !validPortions(entry.portions)) invalid('Een gepland snackmoment heeft ongeldige gegevens.');
+    const planId = ['pre','post'].includes(entry.kind) ? entry.planId ?? sportSourceFromId(entry.id) : null;
+    if (planId !== null && (typeof planId !== 'string' || !/^[\w-]{1,80}$/.test(planId))) invalid('Een sportmoment verwijst naar een ongeldige training.');
     return { id: entry.id, date: entry.date, time: entry.time, kind: entry.kind, recipeId: entry.recipeId,
+      ...(planId ? {planId} : {}),
       portions: entry.portions, pinned: entry.pinned === true, reason: trimText(entry.reason, 300) };
   });
   if (new Set(entries.map(entry => entry.id)).size !== entries.length) invalid('Deze week bevat dubbele momenten.');
@@ -256,9 +263,12 @@ export function generateWeek(state, start, week, catalogue = byId) {
   const entries = week.entries.filter(entry => entry.pinned || entry.kind === 'manual');
   const counts = new Map();
   for (const entry of entries) if (entry.recipeId !== null) counts.set(entry.recipeId, (counts.get(entry.recipeId) ?? 0) + 1);
-  const taken = new Set(entries.map(entry => entry.id));
+  const taken = new Set(entries.map(sportEntryId));
   const clock = new Set(entries.map(entry => entry.date + entry.time));
-  const removed = new Set(week.removed);
+  const removed = new Set(week.removed.map(id => {
+    const planId = sportSourceFromId(id);
+    return planId ? sportId(planId,id.split(':').at(-1)) : id;
+  }));
   for (const slot of planSlots(state, start, prefs)) {
     if (taken.has(slot.id) || removed.has(slot.id) || clock.has(slot.date + slot.time)) continue;
     const available = candidatesFor(slot, catalogue, prefs, state);
@@ -298,6 +308,7 @@ export function generateWeek(state, start, week, catalogue = byId) {
       state.favorites.includes(winner.recipe.id) ? 'Een van je favorieten.' : ''].filter(Boolean).join(' ') :
       'Geen passende suggestie. Bekijk tijd, koeling of je recepten.';
     entries.push({ id: slot.id, date: slot.date, time: slot.time, kind: slot.kind, recipeId: winner?.recipe.id ?? null,
+      ...(slot.plan ? {planId:slot.plan.id} : {}),
       portions: winner?.n ?? 1, pinned: false, reason });
     clock.add(slot.date + slot.time);
     if (winner) counts.set(winner.recipe.id, (counts.get(winner.recipe.id) ?? 0) + 1);
@@ -341,10 +352,66 @@ export function syncWeekGroceries(state, key, catalogue = byId) {
     !hazelnutRisk(catalogue.get(entry.recipeId))) {
     next[entry.recipeId] = (next[entry.recipeId] ?? 0) + entry.portions;
   }
-  if (Object.keys(next).length) state.grocery.weekImports[key] = next;
+  if (Object.hasOwn(state.grocery.weekImports,key) || Object.keys(next).length) state.grocery.weekImports[key] = next;
   else delete state.grocery.weekImports[key];
   reconcileChecks(state.grocery, previous, catalogue);
   return Object.values(next).reduce((a, b) => a + b, 0);
+}
+
+export function sportWeekConflict(state, entry) {
+  if (!entry.planId || !entry.pinned) return false;
+  const plan = state.plans.find(item => item.id === entry.planId);
+  const slot = plan && sportSlots(plan).find(item => item.kind === entry.kind);
+  return !slot || slot.date !== entry.date || slot.time !== entry.time ||
+    (slot.pick?.i >= 0 && (slot.pick.i !== entry.recipeId || slot.pick.n !== entry.portions));
+}
+
+export function syncSportWeeks(state, planId, catalogue = byId) {
+  const plan = state.plans.find(item => item.id === planId);
+  const editable = new Map();
+  const pinned = new Set();
+  const changed = new Set();
+  for (const [key,week] of Object.entries(state.weeks)) {
+    const keep = [];
+    for (const entry of week.entries) {
+      if (entry.planId !== planId || entry.pinned) {
+        keep.push(entry);
+        if (entry.planId === planId) pinned.add(entry.kind);
+      } else {
+        editable.set(entry.kind,entry);
+        changed.add(key);
+      }
+    }
+    week.entries = keep;
+  }
+  for (const slot of plan ? sportSlots(plan) : []) {
+    const previous = editable.get(slot.kind);
+    const key = monday(slot.date);
+    if ((!previous && (!state.weeks[key] || !slot.pick)) || pinned.has(slot.kind)) continue;
+    const week = state.weeks[key] ??= emptyWeek();
+    if (week.entries.length >= 140) continue;
+    if (!slot.pick && week.removed.some(id => sportSourceFromId(id) === planId && id.endsWith(':' + slot.kind))) continue;
+    const candidate = catalogue.get(slot.pick?.i ?? previous?.recipeId);
+    const recipe = candidate && !candidate.archived && !hazelnutRisk(candidate) ? candidate : null;
+    week.entries.push({ id:previous?.id ?? slot.id, planId, kind:slot.kind, date:slot.date, time:slot.time,
+      recipeId:recipe?.id ?? null, portions:recipe ? slot.pick?.n ?? previous?.portions ?? 1 : 1, pinned:false,
+      reason:slot.pick && recipe ? 'Snack gekozen bij je training.' : previous?.reason ?? '' });
+    changed.add(key);
+  }
+  for (const key of changed) {
+    state.weeks[key].entries.sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+    if (Object.hasOwn(state.grocery.weekImports,key)) syncWeekGroceries(state,key,catalogue);
+  }
+}
+
+export function setWeekSportChoice(state, entry, catalogue = byId) {
+  if (!entry.planId || entry.pinned) return false;
+  const plan = state.plans.find(item => item.id === entry.planId);
+  const slot = plan && sportSlots(plan).find(item => item.kind === entry.kind);
+  if (!slot || slot.date !== entry.date || slot.time !== entry.time) return false;
+  plan[entry.kind + 'Pick'] = entry.recipeId === null ? {i:-1,n:0} : {i:entry.recipeId,n:entry.portions};
+  syncSportWeeks(state,plan.id,catalogue);
+  return true;
 }
 
 export function dailyEntries(state, date) {

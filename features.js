@@ -3,6 +3,7 @@ import { newId, nutrientKeys, hazelnutRisk, setGroceryPortions,
 import {
   validateRecipe, validateWork, checkWorkOverlap, trimText, numberOrNull, nextOwnId, validateFilter,
   filterFlags, filterTextKeys, filterRangeKeys, validatePrefs, validateWeek, emptyWeek, generateWeek, syncWeekGroceries,
+  setWeekSportChoice, syncSportWeeks,
   newCook, makeTimer, secondsLeft, timerLabel, workEligible, workProfile, planSlots, catalogueFor
 } from './model.js';
 import { compressPhoto, maxOwnRecipes } from './store.js';
@@ -31,7 +32,7 @@ function readFilter(form) {
 }
 
 export function attachFeatures(main, api) {
-  const { getState, update, redraw, announce, go, route, getPortions, applyFilter, getFilter, filterCount } = api;
+  const { getState, update, redraw, announce, go, route, getPortions, applyFilter, getFilter, filterCount, openCook } = api;
   let wakeLock;
   let wakePending = false;
   let cookTimerLoop;
@@ -167,7 +168,12 @@ export function attachFeatures(main, api) {
         photoVersion: image ? newId() : previous?.photoVersion ?? '', archived: false
       });
       const before = groceryRows(state.grocery, catalogueFor(state));
-      if (previous && !copy) state.customRecipes[state.customRecipes.indexOf(previous)] = record;
+      if (previous && !copy) {
+        state.customRecipes[state.customRecipes.indexOf(previous)] = record;
+        if (previous.hazelnut !== record.hazelnut || previous.labelsReviewed !== record.labelsReviewed ||
+          JSON.stringify(previous.ingredients) !== JSON.stringify(record.ingredients) ||
+          JSON.stringify(previous.allergens) !== JSON.stringify(record.allergens)) delete state.allergenReviews[id];
+      }
       else state.customRecipes.push(record);
       reconcileChecks(state.grocery, before, catalogueFor(state));
       savedId = record.id;
@@ -208,9 +214,16 @@ export function attachFeatures(main, api) {
       if (slot?.profile && recipe && !workEligible(recipe, slot.profile) && recipe.id !== old.recipeId) fail('Dit recept past niet binnen je werkprofiel.');
       const entry = { id: old?.id ?? newId(), date, time: values.get('time'), kind: old?.kind ?? 'manual', recipeId,
         portions: Number(values.get('portions')), pinned: values.has('pinned'), reason: 'Zelf aangepast.' };
+      if (old?.planId) {
+        if (!entry.pinned && (entry.date !== old.date || entry.time !== old.time)) {
+          fail('Wijzig het tijdstip via je training of zet dit moment vast als eigen alternatief.');
+        }
+        entry.planId = old.planId;
+      }
       const entries = week.entries.filter(item => item.id !== entry.id).concat(entry)
         .sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
       state.weeks[key] = validateWeek({ ...week, entries }, key, catalogue);
+      if (entry.planId && !entry.pinned && !setWeekSportChoice(state,entry,catalogue)) syncSportWeeks(state,entry.planId,catalogue);
       if (Object.hasOwn(state.grocery.weekImports,key)) syncWeekGroceries(state,key,catalogue);
     }, 'Snackmoment opgeslagen.', form);
     if (saved && form.isConnected) go('#week/' + key);
@@ -336,10 +349,9 @@ export function attachFeatures(main, api) {
           closeDialog(form.closest('dialog'));
           break;
         case 'filter-reset':
-          form.elements.namedItem('preset').value = '';
-          form.elements.namedItem('profileName').value = '';
-          form.querySelector('[data-v6="filter-delete"]').hidden = true;
-          fillFilter(form, {});
+          closeDialog(form.closest('dialog'));
+          applyFilter({},true);
+          main.querySelector('[data-v6="filter-open"]')?.focus();
           break;
         case 'filter-save': {
           const name = trimText(fieldValue(form, 'profileName'),55);
@@ -459,10 +471,11 @@ export function attachFeatures(main, api) {
           }, 'Week uit boodschappen gehaald.')) redraw();
           break;
         case 'week-pin':
-          if (await update(state => {
+          if (await update((state,catalogue) => {
             const item = state.weeks[key]?.entries.find(entry => entry.id === id);
             if (!item) return false;
             item.pinned = !item.pinned;
+            if (!item.pinned && item.planId) syncSportWeeks(state,item.planId,catalogue);
           })) {
             redraw();
             [...main.querySelectorAll('[data-v6="week-pin"]')].find(button => button.dataset.id === id)?.focus({ preventScroll: true });
@@ -484,14 +497,15 @@ export function attachFeatures(main, api) {
             if (!entry) return false;
             week.entries = week.entries.filter(item => item.id !== id);
             if (entry.kind !== 'manual' && !week.removed.includes(id)) week.removed.push(id);
+            setWeekSportChoice(state,{ ...entry, recipeId:null },catalogue);
             if (Object.hasOwn(state.grocery.weekImports,key)) syncWeekGroceries(state,key,catalogue);
           }, 'Snackmoment verwijderd.')) go('#week/' + key);
           break;
         case 'cook-open': {
           const target = Number(id);
           if (await update(state => {
-            state.cooking[target] ??= newCook(getPortions(target));
-          })) go('#cook/' + target);
+            if (!state.cooking[target] || state.cooking[target].complete) state.cooking[target] = newCook(getPortions(target));
+          })) openCook(target);
           break;
         }
         case 'cook-step':

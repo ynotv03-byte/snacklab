@@ -6,10 +6,10 @@ import {
   groceryRows, setGroceryPortions, shoppingText, sportAdvice
 } from './core.js';
 
-import { blankSnapshot, openStore, loadLegacy, displayCatalogue, serializeBackup, deserializeBackup, maxBackupBytes } from './store.js';
-import { monday, matchesFilter, workProfile, workoutAfterShift, practical, newCook, labelCheckText } from './model.js';
+import { blankSnapshot, openStore, loadLegacy, displayCatalogue, serializeBackup, serializeRawSnapshot, deserializeBackup, maxBackupBytes } from './store.js';
+import { monday, matchesFilter, workProfile, workoutAfterShift, practical, newCook, labelCheckText, syncSportWeeks } from './model.js';
 import { personalToday, workView, workProfilesView, workEditor, weekView, weekEditor, ownEditor, ownList,
-  cookingView, filterDialog, safety, portionNutrition, weekPortionPreview } from './screens.js';
+  cookingView, filterDialog, safety, labelStatus, portionNutrition, weekPortionPreview } from './screens.js';
 import { attachFeatures } from './features.js';
 import { attachGym, gymPages, gymView } from './gym-ui.js';
 import { liveSession, chronological, syncGymAgenda } from './gym-model.js';
@@ -20,11 +20,16 @@ import { produceCaption, produceGrocery, produceLog, producePortion, produceProf
 const main = document.querySelector('main');
 const nav = document.querySelector('nav');
 const toast = document.querySelector('#toast');
+const toastMessage = document.querySelector('#toast-message');
+const toastUndo = document.querySelector('#toast-undo');
+const appVersion = '6.5.0';
 const issues = { read: '', write: '' };
 let db = blankSnapshot();
 const store = openStore();
 const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('snacklab6:' + new URL('./', location.href).pathname) : null;
 let hasPrevious = false;
+let hasRecovery = false;
+let hasUnreadable = false;
 let advancedFilter = {};
 let featureRendered = () => {};
 let gymRendered = () => {};
@@ -32,14 +37,26 @@ let initialized = false;
 let current = { name: 'home', id: null };
 let activePlan;
 let recipeVisit;
+let cookVisit;
 let portions = {};
 let groceryDraft = { name: '', group: 'Overig' };
 let savingProduce = false;
+let lastProduceTap;
+let undoEntry;
+const dirtyForms = new Set();
+let stateRevision = 0;
+let remoteRequest = 0;
+let pendingWrites = 0;
+let remotePending = false;
+let viewDate = localDate();
+let midnightTimer;
 let agendaView = 'upcoming';
 let foodPhase = 'pre';
 const catalogue = { query: '', taste: '', filters: new Set(), sort: 'taste' };
 let toastTimer;
 let pendingWorker;
+let pendingReload = false;
+let offlineStatus = '';
 let exportURL;
 
 const icons = {
@@ -96,35 +113,44 @@ const heading = (title, subtitle = '') => `<div class="page-heading"><h1>${title
 const sortedPlans = () => [...db.plans].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 const nutritionNote = 'Geschat voor deze portie. Merken en gebruikte hoeveelheden kunnen de waarden veranderen.';
 const allergenNote = labelCheckText;
-const activeFilters = () => Boolean(catalogue.taste || catalogue.filters.size);
+const activeFilters = () => Boolean(catalogue.taste || catalogue.filters.size || Object.keys(advancedFilter).length);
 const upcomingPlan = plan => plan.date >= localDate() && !plan.done;
 const segments = (action, label, items, value) => `<div class="segments" role="group" aria-label="${label}">${items.map(([id, name]) =>
   button(action, name, `data-id="${id}" aria-pressed="${id === value}"`, 'segment')).join('')}</div>`;
 
-function announce(message) {
+function announce(message, undoId = null) {
   toast.hidden = false;
-  toast.textContent = message;
+  toastMessage.textContent = message;
+  undoEntry = undoId;
+  toastUndo.hidden = !undoId;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toast.hidden = true; }, 4300);
+  toastTimer = setTimeout(hideToast, undoId ? 9000 : 4300);
+}
+
+function hideToast() {
+  if (toast.contains(document.activeElement)) return;
+  toast.hidden = true;
+  undoEntry = null;
 }
 
 function adopt(state) {
   db = state;
   displayCatalogue(db);
+  stateRevision += 1;
 }
 
-async function refreshState() {
-  try {
-    const state = await store.read();
-    if (state) adopt(state);
-  } catch { /* Keep the last usable snapshot until the next explicit read or write. */ }
+function hasDraft() {
+  for (const form of dirtyForms) if (!form.isConnected) dirtyForms.delete(form);
+  return dirtyForms.size > 0 || Boolean(main.querySelector('dialog[open]'));
 }
 
 async function update(change, message, form) {
+  pendingWrites += 1;
   try {
     const saved = await store.write(change);
     if (!saved) return false;
     adopt(saved);
+    if (form) dirtyForms.delete(form);
     issues.read = issues.write = '';
     channel?.postMessage('changed');
     if (message) announce(message);
@@ -136,6 +162,8 @@ async function update(change, message, form) {
     if (status) status.textContent = text;
     else announce(text);
     return false;
+  } finally {
+    pendingWrites -= 1;
   }
 }
 
@@ -151,7 +179,8 @@ function route() {
   if (name === 'work') return { name, id: validDate(id) ? id : localDate() };
   if (name === 'groente' || name === 'dagmeter') {
     const today = localDate();
-    return { name: 'dagmeter', id: validDate(id) && id <= today ? id : today };
+    const followToday = !validDate(id) || id > today;
+    return { name: 'dagmeter', id: followToday ? today : id, followToday };
   }
   if (name === 'week' || name === 'weekedit') return { name, id: monday(validDate(id) ? id : localDate()), sub };
   if (['recipeedit','recipecopy'].includes(name)) return { name, id: Number(id) || null };
@@ -162,6 +191,12 @@ function route() {
 function go(hash) {
   if (location.hash === hash) redraw();
   else location.hash = hash;
+}
+
+function openCook(id) {
+  if (current.name !== 'recipe' || current.id !== id) return go('#cook/' + id);
+  history.pushState({ snacklabCook: { id, scroll:scrollY, panels:openPanels() } }, '', '#cook/' + id);
+  syncRoute();
 }
 
 function render() {
@@ -185,6 +220,7 @@ function render() {
   document.body.classList.toggle('cooking', current.name === 'cook');
   main.dataset.page = current.name;
   main.innerHTML = storageNotice() + (gymPages.includes(current.name) ? gymView(current,db) : views[current.name]());
+  remotePending = false;
   document.title = (main.querySelector('h1')?.textContent || 'Vandaag') + ' · SnackLab';
 }
 
@@ -333,13 +369,16 @@ function recipeView() {
   const back = recipeVisit?.back ?? '#recipes';
   const backLabel = { home: 'Vandaag', recipes: 'Recepten', grocery: 'Boodschappen', agenda: 'Agenda', food: 'Sportvoeding', work: 'Werkdag', week: 'Weekplanner', own: 'Eigen recepten' }[back.split('/')[0].slice(1)] ?? 'Recepten';
   const plan = recipeVisit?.plan && planById(recipeVisit.plan);
+  const cook = db.cooking[recipe.id];
+  const cookLabel = cook?.complete ? 'Opnieuw koken' : cook ? 'Kookmodus hervatten' : 'Start kookmodus';
   return `<a href="${escapeHtml(back)}" class="back" data-recipe-back>${icon('back')} ${backLabel}</a>
     <div class="detail-top">${photo(recipe, { priority: true })}
       <div class="detail-copy"><div class="detail-tags"><span class="badge">${cap(recipe.taste)}</span>
       <span>${icon('clock')} ${recipe.minutes} min</span></div>
       <h1>${escapeHtml(recipe.name)}</h1>${recipe.description ? `<p class="recipe-description">${escapeHtml(recipe.description)}</p>` : ''}${favourite(recipe)}</div></div>
+    <div class="recipe-label-status">${labelStatus(recipe,db)}</div>
     <div class="button-row recipe-actions">
-      <button class="button primary" type="button" data-v6="cook-open" data-id="${recipe.id}">${icon('book')} ${db.cooking[recipe.id] ? 'Kookmodus hervatten' : 'Start kookmodus'}</button>
+      <button class="button primary" type="button" data-v6="cook-open" data-id="${recipe.id}">${icon('book')} ${cookLabel}</button>
       ${recipe.custom && !recipe.archived ? `<a class="button" href="#recipeedit/${recipe.id}">Bewerken</a>
         <a class="button" href="#recipecopy/${recipe.id}">Dupliceren</a>
         <button class="button text-button danger" type="button" data-v6="recipe-archive" data-id="${recipe.id}">Verwijderen</button>` : ''}
@@ -365,7 +404,8 @@ function recipeView() {
         <div class="section-head"><h2>Ingrediënten</h2><span class="badge">${formatPortions(n)}</span></div>
         <ul class="ingredient-list">${measurements.map(({ name, amount }) =>
           `<li><span>${escapeHtml(cap(name))}</span><strong>${escapeHtml(amount || 'Naar smaak')}</strong></li>`).join('')}</ul>
-        ${button('grocery-add', icon('basket') + ' Voeg toe aan boodschappen', `data-id="${recipe.id}" data-n="${n}"${disabled(inList + n > maxPortions)}`, 'primary ingredient-action')}
+        ${!hazelnutRisk(recipe) && !recipe.archived ? button('grocery-add', icon('basket') + ' Voeg toe aan boodschappen',
+          `data-id="${recipe.id}" data-n="${n}"${disabled(inList + n > maxPortions)}`, 'primary ingredient-action') : ''}
         ${inList ? `<p class="note"><a href="#grocery">${formatPortions(inList)} op je boodschappenlijst</a>${inList + n > maxPortions ? ' · maximaal 12 porties per recept' : ''}</p>` : ''}
         ${plan && !hazelnutRisk(recipe) ? `<div class="button-row head-actions">
           ${button('save-recipe-pick', recipeVisit.phase === 'pre' ? 'Bewaar als snack vooraf' : 'Bewaar als snack achteraf',
@@ -375,6 +415,8 @@ function recipeView() {
         <h2>Bereiding</h2>
         <ol class="steps">${recipe.steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
         <p class="note">${recipe.allergens.length ? 'Op basis van de ingrediënten: ' + escapeHtml(recipe.allergens.join(', ')) + '. ' : 'Geen allergenen opgegeven. '}${allergenNote}</p>
+        ${!hazelnutRisk(recipe) && !recipe.archived ? button(db.allergenReviews[recipe.id] ? 'etiket-wis' : 'etiket-bewaar',
+          db.allergenReviews[recipe.id] ? 'Etiketcontrole wissen' : 'Etiketten gecontroleerd', `data-id="${recipe.id}"`, 'text-button') : ''}
         ${recipe.custom ? `<p class="note">${practical(recipe).storage === 'cold' ? 'Koeling nodig. ' : practical(recipe).storage === 'shelf' ? 'Door jou als ongekoeld meeneembaar ingevoerd. ' : 'Koeling onbekend. '}${escapeHtml(practical(recipe).note)}</p>` : ''}
         <label class="field rating"><span>Jouw beoordeling</span><select id="rating-select">
           ${options([[0, 'Nog te proberen'], ...[1, 2, 3, 4, 5].map(n => [n, n + (n === 1 ? ' ster' : ' sterren')])], db.ratings[recipe.id] ?? 0)}
@@ -607,10 +649,12 @@ function foodChoice(plan, phase, option) {
     <h3>${recipe ? `<a href="#recipe/${i}" data-recipe-link data-portions="${n}" data-plan="${plan.id}" data-phase="${phase}">${escapeHtml(recipe.name)}</a>` : 'Geen extra snack'}</h3>
     ${recipe ? `<p><strong>${formatPortions(n)}</strong> ·  ${nutrition.kcal === null ? 'kcal onbekend' : '±' + metric(nutrition.kcal,'kcal')} · ${metric(nutrition.carbs)} KH · ${metric(nutrition.protein)} eiwit</p>` : ''}
     ${reason ? `<p class="note">${reason}</p>` : ''}
+    ${recipe ? labelStatus(recipe,db) : ''}
+    ${recipe && chosen && !hazelnutRisk(recipe) ? '<p class="note">Deze knop voegt een losse boodschap toe, buiten je weekplanning om.</p>' : ''}
     </div>
     <div class="button-row">
       ${button('food-pick', chosen ? icon('check') + ' Gekozen' : recipe ? 'Kies snack' : 'Kies geen snack', attrs + disabled(chosen))}
-      ${recipe && chosen && !hazelnutRisk(recipe) ? button('grocery-add', icon('basket') + ' Naar boodschappen', `data-id="${i}" data-phase="${phase}" data-n="${n}"${disabled(inList + n > maxPortions)}`) : ''}
+      ${recipe && chosen && !hazelnutRisk(recipe) ? button('grocery-add', icon('basket') + ' Voeg toe aan boodschappen', `data-id="${i}" data-phase="${phase}" data-n="${n}"${disabled(inList + n > maxPortions)}`) : ''}
     </div></article>`;
 }
 
@@ -622,7 +666,7 @@ function profile() {
     recovered ||= localStorage.getItem(restoreKey) !== null;
     legacy = localStorage.getItem(legacyKey) !== null;
   } catch { /* The status message above gives the recovery path. */ }
-  return heading('Profiel') +
+  return heading('Profiel', 'Versie ' + appVersion) +
     `<div class="detail-grid profile-grid">
       ${produceProfile(db)}
       <section class="panel profile-work"><h2>Werkprofielen</h2><p>Stel je diensten, pauzes, koeling en voorbereidingstijd in voor persoonlijke suggesties.</p>
@@ -644,8 +688,9 @@ function profile() {
       <section class="panel"><h2>Mijn gegevens</h2>
         <p>Je recepten, foto’s, weekplannen, trainingen, eetlogboek en instellingen staan op dit apparaat. Exporteer een JSON-back-up om ze te bewaren of naar een ander apparaat te verplaatsen.</p>
         <div class="button-row">
-          ${button('backup', 'Exporteer back-up', '', 'primary')}
-          ${issues.read ? button('download-raw', 'Download oorspronkelijke gegevens') : ''}
+          ${issues.read ? '' : button('backup', 'Exporteer back-up', '', 'primary')}
+          ${issues.read || hasUnreadable ? button('download-raw', 'Download oorspronkelijke gegevens') : ''}
+          ${issues.read && hasRecovery ? button('restore-recovery', 'Herstel vorige geldige gegevens') : ''}
           ${legacy ? button('download-legacy', 'Download 4.1-back-up') : ''}
           ${recovered ? button('download-restore', 'Download vorige gegevens') : ''}
         </div>
@@ -656,7 +701,7 @@ function profile() {
       <details class="panel profile-details" id="install-help" data-keep-open>
         <summary>Op je iPhone installeren ${icon('down', 'toggle-icon')}</summary>
         <ol class="steps"><li>Open SnackLab in Safari.</li><li>Tik op Deel en kies ‘Zet op beginscherm’.</li><li>Zet ‘Open als webapp’ aan en tik op ‘Voeg toe’.</li></ol>
-        <p id="offline-status" class="note" aria-live="polite">${navigator.serviceWorker?.controller ? 'Offline cache is actief.' : 'Open SnackLab online om offline gebruik voor te bereiden.'}</p>
+        <p id="offline-status" class="note" aria-live="polite">${offlineStatus || (navigator.serviceWorker?.controller ? 'Offline cache is actief.' : 'Open SnackLab online om offline gebruik voor te bereiden.')}</p>
       </details>
       <details class="panel profile-details" id="allergen-help" data-keep-open>
         <summary>Ingrediënten & allergenen ${icon('down', 'toggle-icon')}</summary><p>${allergenNote}</p><p class="note">${nutritionNote}</p>
@@ -680,20 +725,25 @@ function download(filename, data) {
   if (!target) anchor.remove();
 }
 
+async function restoreSnapshot(incoming, label) {
+  const counts = `${incoming.customRecipes.length} eigen recepten, ${incoming.gym.sessions.length} workouts en ${incoming.vegetables.entries.length} eetlogregels`;
+  if (!confirm(`${label} terugzetten met ${counts}? SnackLab bewaart een kopie van de huidige gegevens.`)) return;
+  adopt(await store.replace(incoming));
+  hasPrevious = Boolean(await store.previous().catch(() => null));
+  hasUnreadable = await store.rawUnreadable().catch(() => undefined) !== undefined;
+  issues.read = issues.write = '';
+  activePlan = undefined;
+  portions = {};
+  channel?.postMessage('changed');
+  announce(label + ' hersteld.');
+  syncRoute();
+}
+
 async function restore(file) {
   if (!file) return;
   if (file.size > maxBackupBytes) { announce('Kies een SnackLab-back-up van maximaal 120 MB.'); return; }
   try {
-    const incoming = deserializeBackup(await file.text());
-    if (!confirm(`Back-up met ${incoming.plans.length} agendatrainingen, ${incoming.gym.sessions.length} workouts en ${incoming.customRecipes.length} eigen recepten terugzetten? Je huidige gegevens worden eerst als vorige back-up bewaard.`)) return;
-    adopt(await store.replace(incoming));
-    hasPrevious = true;
-    issues.read = issues.write = '';
-    activePlan = undefined;
-    portions = {};
-    channel?.postMessage('changed');
-    announce('Back-up hersteld.');
-    syncRoute();
+    await restoreSnapshot(deserializeBackup(await file.text()),'Back-up');
   } catch (error) {
     announce(error instanceof SyntaxError ? 'Dit bestand bevat geen geldige JSON.' : error.message || 'Herstellen is mislukt.');
   }
@@ -763,6 +813,7 @@ function redraw({ focus = false, returnVisit, actionFocus } = {}) {
 function syncRoute() {
   if (location.hash === '#main') return;
   const lastVisit = recipeVisit;
+  const lastCookVisit = cookVisit;
   const previous = current;
   current = route();
   if (previous.name === 'cook' && current.name === 'recipe' && previous.id === current.id && db.cooking[current.id]) {
@@ -774,6 +825,7 @@ function syncRoute() {
     setTimeout(() => URL.revokeObjectURL(previous), 10000);
   }
   const visit = history.state?.snacklabRecipe;
+  cookVisit = current.name === 'cook' && history.state?.snacklabCook?.id === current.id ? history.state.snacklabCook : undefined;
   recipeVisit = current.name === 'recipe' && visit?.recipeId === current.id ? visit : undefined;
   if (recipeVisit?.portions && portions[current.id] === undefined) portions[current.id] = recipeVisit.portions;
   if (current.name === 'recipes' && ['quick', 'favorites'].includes(current.id)) {
@@ -783,7 +835,10 @@ function syncRoute() {
     history.replaceState(null, '', '#recipes');
   }
   const target = location.hash || '#home';
-  redraw({ focus: initialized, returnVisit: lastVisit?.back === target ? lastVisit : undefined });
+  const fromCooking = previous.name === 'cook' && current.name === 'recipe' && lastCookVisit?.id === current.id;
+  redraw({ focus: initialized, returnVisit: fromCooking ? lastCookVisit : lastVisit?.back === target ? lastVisit : undefined });
+  if (fromCooking) main.querySelector('[data-v6="cook-open"]')?.focus({preventScroll:true});
+  viewDate = localDate();
   initialized = true;
 }
 
@@ -810,6 +865,11 @@ main.addEventListener('click', async event => {
     return;
   }
   if (recipeVisit && navigate && event.target.closest('a[data-recipe-back]')) {
+    event.preventDefault();
+    history.back();
+    return;
+  }
+  if (cookVisit && navigate && event.target.closest('a[data-cook-back]')) {
     event.preventDefault();
     history.back();
     return;
@@ -843,6 +903,7 @@ main.addEventListener('click', async event => {
       if (id === 'all') {
         catalogue.taste = '';
         catalogue.filters.clear();
+        advancedFilter = {};
       } else if (id === 'hartig' || id === 'zoet') catalogue.taste = catalogue.taste === id ? '' : id;
       else if (catalogue.filters.has(id)) catalogue.filters.delete(id);
       else catalogue.filters.add(id);
@@ -877,25 +938,49 @@ main.addEventListener('click', async event => {
       if (savingProduce) return;
       const date = localDate();
       const n = current.name === 'cook' ? db.cooking[recipeId]?.servings ?? 1 : portions[recipeId] ?? 1;
+      const key = [date,recipeId,n].join(':');
+      const now = performance.now();
+      if (lastProduceTap?.key === key && now - lastProduceTap.time < 850) return;
+      const entryId = newId();
       savingProduce = true;
+      control.disabled = true;
       try {
         changed = await update((state, catalogue) => {
           const recipe = catalogue.get(recipeId);
           if (!recipe) return false;
           const amounts = loggableProduce(recipeProduce(recipe));
           if (!amounts.grams && !amounts.fruitGrams) return false;
-          appendProduce(state,{ id:newId(), date, name:recipe.name, recipeId, portions:n, ...amounts });
-        }, 'Toegevoegd aan je dagmeter.');
+          appendProduce(state,{ id:entryId, date, name:recipe.name, recipeId, portions:n, ...amounts });
+        });
+        if (changed) {
+          lastProduceTap = {key,time:performance.now()};
+          announce('Toegevoegd aan je dagmeter · ' + formatPortions(n),entryId);
+        }
       } finally {
         savingProduce = false;
+        control.disabled = false;
       }
       break;
     }
     case 'veg-remove':
       changed = await update(state => { state.vegetables.entries = state.vegetables.entries.filter(entry => entry.id !== id); }, 'Verwijderd uit je dagmeter.');
       break;
+    case 'etiket-bewaar':
+    case 'etiket-wis':
+      if (action === 'etiket-bewaar' && !confirm('Heb je de actuele etiketten van de gebruikte producten op hazelnoot en mogelijke sporen gecontroleerd?')) return;
+      changed = await update((state,catalogue) => {
+        const recipe = catalogue.get(recipeId);
+        if (!recipe || recipe.archived || hazelnutRisk(recipe)) return false;
+        if (action === 'etiket-bewaar') state.allergenReviews[recipeId] = localDate();
+        else delete state.allergenReviews[recipeId];
+      },action === 'etiket-bewaar' ? 'Eigen etiketcontrole opgeslagen.' : 'Etiketcontrole gewist.');
+      break;
     case 'grocery-add':
-      changed = await update(state => {
+      changed = await update((state,catalogue) => {
+        const recipe = catalogue.get(recipeId);
+        if (!recipe || recipe.archived || hazelnutRisk(recipe)) {
+          throw new Error('Dit recept kan niet aan de boodschappenlijst worden toegevoegd. Controleer de receptstatus en allergenen.');
+        }
         const count = (state.grocery.recipes[recipeId] ?? 0) + amount;
         if (count > maxPortions) {
           announce('Maximaal 12 porties per recept op je boodschappenlijst.');
@@ -926,9 +1011,10 @@ main.addEventListener('click', async event => {
       break;
     case 'plan-remove':
       if (!confirm('Deze training verwijderen?')) return;
-      changed = await update(state => {
+      changed = await update((state,catalogue) => {
         state.plans = state.plans.filter(item => item.id !== id);
         for (const session of state.gym.sessions) if (session.agenda === id) session.agenda = null;
+        syncSportWeeks(state,id,catalogue);
       }, 'Training verwijderd.');
       break;
     case 'save-recipe-pick':
@@ -942,6 +1028,7 @@ main.addEventListener('click', async event => {
           if (hazelnutRisk(recipe)) throw new Error('Dit recept noemt hazelnoot of mogelijke sporen.');
         }
         plan[phase + 'Pick'] = { i: amount, n: Number(control.dataset.portions) };
+        syncSportWeeks(state,id,catalogue);
       }, 'Snackkeuze opgeslagen.');
       if (changed && action === 'save-recipe-pick') {
         activePlan = id;
@@ -957,10 +1044,29 @@ main.addEventListener('click', async event => {
       catch { announce('De back-up kon niet worden gemaakt.'); }
       finally { control.disabled = false; }
       return;
-    case 'download-raw':
+    case 'restore-recovery': {
+      try {
+        const recovery = await store.recovery();
+        if (recovery) await restoreSnapshot(recovery,'Herstelpunt');
+        else announce('Er is geen geldig lokaal herstelpunt gevonden.');
+      } catch { announce('Het lokale herstelpunt kon niet worden geopend.'); }
+      return;
+    }
+    case 'download-raw': {
+      try {
+        const raw = issues.read ? await store.rawCurrent().catch(() => undefined) : await store.rawUnreadable();
+        if (raw !== undefined) download('snacklab-noodexport-' + localDate() + '.json',serializeRawSnapshot(raw));
+        else {
+          const legacy = localStorage.getItem(storageKey);
+          if (legacy !== null) download('snacklab-oorspronkelijke-gegevens.json',legacy);
+          else announce('Er zijn geen oorspronkelijke gegevens beschikbaar voor export.');
+        }
+      } catch { announce('De oorspronkelijke gegevens konden niet worden geëxporteerd.'); }
+      return;
+    }
     case 'download-legacy':
     case 'download-restore': {
-      const key = { 'download-raw': storageKey, 'download-legacy': legacyKey, 'download-restore': restoreKey }[action];
+      const key = { 'download-legacy': legacyKey, 'download-restore': restoreKey }[action];
       try {
         if (action === 'download-restore' && hasPrevious) {
           const previous = await store.previous();
@@ -1055,6 +1161,9 @@ async function handleProduceForm(form, values) {
   }
   if (savingProduce) return;
   const nullable = key => values.get(key) === '' ? null : Number(values.get(key));
+  const manual = form.id === 'veg-eaten-form';
+  const date = current.followToday ? localDate() : form.dataset.date;
+  const entryId = manual ? newId() : null;
   savingProduce = true;
   const submit = form.querySelector('button[type="submit"]');
   submit.disabled = true;
@@ -1062,9 +1171,9 @@ async function handleProduceForm(form, values) {
     const profile = form.id === 'veg-profile-form';
     const saved = await update(state => {
       if (profile) Object.assign(state.vegetables,validateBody(nullable('height'),nullable('weight')));
-      else if (form.id === 'veg-eaten-form') {
+      else if (manual) {
         const name = String(values.get('meal') ?? '').trim() || 'Groente en fruit uit andere maaltijden';
-        appendProduce(state,{id:newId(),date:form.dataset.date,name,recipeId:null,
+        appendProduce(state,{id:entryId,date,name,recipeId:null,
           grams:Number(values.get('grams')),fruitGrams:Number(values.get('fruitGrams'))});
       } else {
         const at = state.vegetables.entries.findIndex(entry => entry.id === form.dataset.vegEdit);
@@ -1074,8 +1183,10 @@ async function handleProduceForm(form, values) {
           { portions:Number(values.get('amount')) };
         state.vegetables.entries[at] = validateProduceEntry({ ...entry, ...amounts });
       }
-    },profile ? 'Profiel opgeslagen.' : 'Je dagmeter is bijgewerkt.',form);
+    },manual ? null : profile ? 'Profiel opgeslagen.' : 'Je dagmeter is bijgewerkt.',form);
+    if (saved && manual) announce('Toegevoegd aan je dagmeter.',entryId);
     if (saved && form.isConnected) {
+      if (manual && current.followToday) current = route();
       redraw();
       if (profile) formFocus('veg-profile-form','height');
       else if (form.id === 'veg-eaten-form') formFocus('veg-eaten-form', Number(values.get('grams')) > 0 ? 'grams' : 'fruitGrams');
@@ -1114,7 +1225,7 @@ main.addEventListener('submit', async event => {
   if (form.id !== 'plan-form') return;
   event.preventDefault();
   const id = form.dataset.id;
-  const validated = await update(state => {
+  const validated = await update((state,catalogue) => {
     const at = state.plans.findIndex(plan => plan.id === id);
     if (current.id && !current.id.startsWith('work-') && at < 0) {
       announce('Deze training is intussen verwijderd.');
@@ -1138,6 +1249,7 @@ main.addEventListener('submit', async event => {
     if (at >= 0) state.plans[at] = plan;
     else state.plans.push(plan);
     syncGymAgenda(state,plan);
+    syncSportWeeks(state,plan.id,catalogue);
     return true;
   }, 'Training opgeslagen.');
   if (validated) {
@@ -1152,21 +1264,135 @@ function formFocus(formId, name) {
 
 history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', syncRoute);
+
+function markDraft(event) {
+  const form = event.target.form;
+  if (form && main.contains(form) && form.dataset.feature !== 'filters' && event.target.type !== 'hidden') dirtyForms.add(form);
+}
+main.addEventListener('input',markDraft,true);
+main.addEventListener('change',markDraft,true);
+main.addEventListener('click',event => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  const form = button.form ?? (button.dataset.gym === 'add' ? main.querySelector('[data-gym-form="plan"]') : null);
+  if (!form) return;
+  if (['add-ingredient','add-step','remove-field','estimate'].includes(button.dataset.v6) ||
+      ['add','remove-entry','apply-routine','estimate','up','down'].includes(button.dataset.gym)) dirtyForms.add(form);
+},true);
+
+function updateNavCount() {
+  const iconWrap = nav.querySelector('a[href="#grocery"] .nav-icon');
+  if (!iconWrap) return;
+  const count = groceryRows(db.grocery).filter(item => !item.checked).length;
+  const badge = iconWrap.querySelector('.nav-count');
+  if (!count) badge?.remove();
+  else if (badge) badge.textContent = count;
+  else iconWrap.insertAdjacentHTML('beforeend',`<span class="nav-count" aria-hidden="true">${count}</span>`);
+}
+
+function focusedField() {
+  const focused = document.activeElement;
+  return main.contains(focused) && focused.matches('input,select,textarea,[contenteditable="true"]');
+}
+
+function refreshPendingView() {
+  if (!remotePending || hasDraft() || focusedField() || pendingWrites) return;
+  const active = document.activeElement;
+  const key = active?.dataset?.action ? {...active.dataset} : undefined;
+  const y = scrollY;
+  redraw({actionFocus:key});
+  scrollTo(0,y);
+}
+
 channel?.addEventListener('message', async () => {
-  if (!initialized || ['edit','recipeedit','recipecopy','workedit','weekedit','week','gymedit','gymset'].includes(current.name) || main.querySelector('dialog[open]')) return;
-  await refreshState();
-  redraw();
+  if (!initialized) return;
+  const revision = stateRevision;
+  const request = ++remoteRequest;
+  try {
+    const state = await store.read();
+    if (!state || request !== remoteRequest || revision !== stateRevision) return;
+    adopt(state);
+    remotePending = true;
+    updateNavCount();
+    refreshPendingView();
+  } catch { /* The last readable state stays available on screen. */ }
+});
+main.addEventListener('focusout',() => setTimeout(() => { refreshPendingView(); refreshDisplayedDay(); },0));
+main.addEventListener('close',refreshPendingView,true);
+
+function refreshDisplayedDay() {
+  const today = localDate();
+  if (!initialized || viewDate === today || document.hidden) return;
+  const followsToday = current.name === 'home' || (current.name === 'dagmeter' && current.followToday);
+  if (followsToday && (hasDraft() || focusedField())) return;
+  viewDate = today;
+  if (followsToday) {
+    current = route();
+    redraw();
+  }
+}
+
+function checkDay() {
+  refreshDisplayedDay();
+  clearTimeout(midnightTimer);
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(24,0,0,30);
+  midnightTimer = setTimeout(checkDay,Math.max(500,next - now));
+}
+document.addEventListener('visibilitychange',checkDay);
+window.addEventListener('pageshow',checkDay);
+window.addEventListener('focus',checkDay);
+checkDay();
+
+toast.addEventListener('focusout',() => setTimeout(() => {
+  if (toast.hidden || !undoEntry) return;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast,4300);
+},0));
+toastUndo.addEventListener('click',async () => {
+  if (!undoEntry) return;
+  const id = undoEntry;
+  toastUndo.disabled = true;
+  const removed = await update(state => {
+    const before = state.vegetables.entries.length;
+    state.vegetables.entries = state.vegetables.entries.filter(entry => entry.id !== id);
+    return state.vegetables.entries.length !== before;
+  });
+  toastUndo.disabled = false;
+  if (removed) {
+    lastProduceTap = null;
+    announce('Registratie ongedaan gemaakt.');
+    remotePending = true;
+    refreshPendingView();
+    if (document.activeElement === document.body) (main.querySelector('[data-action="veg-eaten"]') ?? main).focus({preventScroll:true});
+  } else if (undoEntry === id) {
+    announce('Deze registratie is niet meer beschikbaar.');
+  }
 });
 
-function showUpdate(worker) {
-  pendingWorker = worker;
+function showUpdate(worker = null) {
+  pendingWorker = worker ?? pendingWorker;
   if (document.querySelector('#update-banner')) return;
   const banner = document.createElement('aside');
   banner.id = 'update-banner';
   banner.className = 'update-banner';
-  banner.innerHTML = '<span>Er is een nieuwe versie.</span><button class="button" type="button">Vernieuwen</button>';
-  banner.querySelector('button').addEventListener('click', () => pendingWorker?.postMessage({ type: 'ACTIVATE_UPDATE' }));
+  banner.innerHTML = '<span role="status">Er is een nieuwe versie.</span><button class="button" type="button">Vernieuwen</button>';
+  banner.querySelector('button').addEventListener('click', () => {
+    if (hasDraft() || pendingWrites || savingProduce) {
+      banner.querySelector('span').textContent = 'Rond eerst je open invoer af om te vernieuwen.';
+      return;
+    }
+    if (pendingReload) location.reload();
+    else pendingWorker?.postMessage({ type: 'ACTIVATE_UPDATE' });
+  });
   document.querySelector('.site-head').after(banner);
+}
+
+function cacheStatus(message) {
+  offlineStatus = message;
+  const status = document.querySelector('#offline-status');
+  if (status) status.textContent = message;
 }
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -1177,27 +1403,35 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
       const installing = registration.installing;
       installing?.addEventListener('statechange', () => {
         if (installing.state === 'installed' && navigator.serviceWorker.controller) showUpdate(installing);
+        if (installing.state === 'redundant') cacheStatus(navigator.serviceWorker.controller ?
+          'De nieuwe versie kon niet worden voorbereid. Je huidige versie blijft beschikbaar.' :
+          'Offline gebruik kon niet worden voorbereid. Probeer opnieuw met internet.');
       });
     });
   }).catch(() => {
-    const status = document.querySelector('#offline-status');
-    if (status) status.textContent = 'Offline gebruik kon niet worden voorbereid. Probeer opnieuw met internet.';
+    cacheStatus('Offline gebruik kon niet worden voorbereid. Probeer opnieuw met internet.');
   });
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (pendingWorker || hadController) location.reload();
-    else {
-      const status = document.querySelector('#offline-status');
-      if (status) status.textContent = 'Offline cache is actief.';
-    }
+    if (pendingWorker || hadController) {
+      if (hasDraft() || pendingWrites || savingProduce) {
+        pendingReload = true;
+        showUpdate();
+        document.querySelector('#update-banner span').textContent = 'De update staat klaar. Vernieuw nadat je je invoer hebt opgeslagen.';
+      } else location.reload();
+    } else cacheStatus('Offline cache is actief.');
   });
 }
 
 featureRendered = attachFeatures(main, {
-  getState: () => db, update, redraw, go, announce, route: () => current,
+  getState: () => db, update, redraw, go, announce, route: () => current, openCook,
   getPortions: id => portions[id] ?? 1,
   getFilter: () => advancedFilter,
   filterCount: filter => findRecipes(filter).length,
-  applyFilter: filter => { advancedFilter = filter; redraw(); }
+  applyFilter: (filter, resetQuick = false) => {
+    if (resetQuick) { catalogue.taste = ''; catalogue.filters.clear(); }
+    advancedFilter = filter;
+    redraw();
+  }
 });
 
 gymRendered = attachGym(main,{getState: () => db,update,redraw,go,announce,route: () => current});
@@ -1205,11 +1439,13 @@ gymRendered = attachGym(main,{getState: () => db,update,redraw,go,announce,route
 async function start() {
   try {
     adopt(await store.init());
-    hasPrevious = Boolean(await store.previous());
   } catch (error) {
     try { adopt(loadLegacy()); } catch { /* Raw legacy data remains available for export. */ }
     issues.read = 'Lokale gegevens konden niet volledig worden geopend. Exporteer je gegevens in Profiel. ' + (error.message || '');
   }
+  hasPrevious = Boolean(await store.previous().catch(() => null));
+  hasUnreadable = await store.rawUnreadable().catch(() => undefined) !== undefined;
+  if (issues.read) hasRecovery = Boolean(await store.recovery().catch(() => null));
   syncRoute();
 }
 void start();

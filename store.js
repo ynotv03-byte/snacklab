@@ -1,18 +1,20 @@
 import { emptyGym, validateGym } from './gym-model.js';
 import { emptyVegetables, validateVegetables } from './vegetables.js';
-import { blankState, builtinMap, parseState, setOwnRecipes, storageKey, validDate } from './core.js';
+import { blankState, builtinMap, localDate, parseState, setOwnRecipes, storageKey, validDate } from './core.js';
 import { validateRecipe, validateWork, validateWeek, validateCook, validateFilter, maxPlanPortions,
-  checkWorkOverlap, catalogueFor, isObject, isJPEG, recipeFromOwn, trimText, monday } from './model.js';
+  checkWorkOverlap, catalogueFor, isObject, isJPEG, recipeFromOwn, trimText, monday, syncSportWeeks } from './model.js';
 
 export const maxOwnRecipes = 100;
 export const maxBackupBytes = 120 * 1024 * 1024;
 const snapshotFormat = 'SnackLab';
+const storageRevision = 1;
 const validKey = value => /^[\w:-]{1,120}$/.test(value);
 
 export function blankSnapshot(base = blankState()) {
   return {
-    ...base, schemaVersion: 6, customRecipes: [], nextRecipeId: 1000,
+    ...base, schemaVersion: 6, storageRevision, customRecipes: [], nextRecipeId: 1000,
     workProfiles: [], weeks: {}, cooking: {}, filterProfiles: [], gym: emptyGym(), vegetables: emptyVegetables(),
+    allergenReviews: {},
     grocery: { ...base.grocery, weekImports: {} }
   };
 }
@@ -31,9 +33,17 @@ export function validateSnapshot(input) {
       !Array.isArray(input.workProfiles) || input.workProfiles.length > 24 ||
       !Array.isArray(input.filterProfiles) || input.filterProfiles.length > 40 ||
       !isObject(input.weeks) || !isObject(input.cooking)) throw new Error('Deze back-up is geen ondersteunde SnackLab 6-back-up.');
+  if (input.storageRevision !== undefined && input.storageRevision !== storageRevision) {
+    throw new Error('Deze gegevens zijn gemaakt met een nieuwere of onbekende opslagversie van SnackLab.');
+  }
   const customRecipes = input.customRecipes.map(validateRecipe);
   unique(customRecipes, 'id', 'Dubbele receptnummers in de back-up.');
   const catalogue = catalogueFor({ customRecipes });
+  const reviewInput = input.allergenReviews ?? {};
+  if (!isObject(reviewInput) ||
+      !Object.entries(reviewInput).every(([id, date]) => String(Number(id)) === id && catalogue.has(Number(id)) && validDate(date))) {
+    throw new Error('De back-up bevat een ongeldige datum voor etiketcontrole.');
+  }
   const workProfiles = input.workProfiles.map(validateWork);
   unique(workProfiles, 'id', 'Dubbele werkprofielen in de back-up.');
   checkWorkOverlap(workProfiles);
@@ -58,15 +68,20 @@ export function validateSnapshot(input) {
   if (!Number.isSafeInteger(input.nextRecipeId) || input.nextRecipeId < floor || input.nextRecipeId >= Number.MAX_SAFE_INTEGER) throw new Error('Receptnummerreeks is ongeldig.');
   const {
     customRecipes: _recipes, workProfiles: _work, filterProfiles: _filters, cooking: _cook,
-    weeks: _weeks, gym: _gym, vegetables: _vegetables, ...baseFields
+    weeks: _weeks, gym: _gym, vegetables: _vegetables, allergenReviews: _reviews, ...baseFields
   } = input;
   const base = parseState(JSON.stringify({ ...baseFields, grocery: groceryBase }), catalogue);
   const gym = input.gym === undefined ? emptyGym() : validateGym(input.gym);
   const vegetables = input.vegetables === undefined ? emptyVegetables() : validateVegetables(input.vegetables);
   const planIds = new Set(base.plans.filter(plan => plan.sport === 'Krachttraining').map(plan => plan.id));
   for (const session of gym.sessions) if (!planIds.has(session.agenda)) session.agenda = null;
-  return { ...base, customRecipes, workProfiles, filterProfiles, weeks, cooking, gym, vegetables,
-    grocery: { ...base.grocery, weekImports }, nextRecipeId: input.nextRecipeId };
+  const snapshot = { ...base, storageRevision, customRecipes, workProfiles, filterProfiles, weeks, cooking, gym, vegetables, allergenReviews: { ...reviewInput },
+    grocery: { ...base.grocery, weekImports: { ...weekImports } }, nextRecipeId: input.nextRecipeId };
+  if (input.storageRevision === undefined) {
+    const planIds = new Set(Object.values(weeks).flatMap(week => week.entries.map(entry => entry.planId).filter(Boolean)));
+    for (const id of planIds) syncSportWeeks(snapshot,id,catalogue);
+  }
+  return snapshot;
 }
 
 export function loadLegacy() {
@@ -113,9 +128,33 @@ export function openStore(indexed = globalThis.indexedDB, name = 'snacklab6:' + 
       };
     });
   }
+
+  function checkpoint(bucket, snapshot) {
+    const date = localDate();
+    const lookup = bucket.get('checkpoint-date');
+    lookup.onerror = event => event.preventDefault();
+    lookup.onsuccess = () => {
+      if (lookup.result === date) return;
+      const copy = bucket.put(snapshot, 'checkpoint');
+      copy.onerror = event => event.preventDefault();
+      copy.onsuccess = () => { bucket.put(date, 'checkpoint-date').onerror = event => event.preventDefault(); };
+    };
+  }
+
+  const raw = key => transaction('readonly', key, stored => stored);
+  async function validCopy(key) {
+    const stored = await raw(key);
+    if (stored === undefined) return null;
+    try { return validateSnapshot(stored); } catch { return null; }
+  }
   return {
     init: () => transaction('readwrite', 'current', (stored, bucket) => {
-      if (stored !== undefined) return validateSnapshot(stored);
+      if (stored !== undefined) {
+        const snapshot = validateSnapshot(stored);
+        checkpoint(bucket, snapshot);
+        if (stored.storageRevision !== storageRevision) bucket.put(snapshot,'current');
+        return snapshot;
+      }
       const initial = loadLegacy();
       bucket.put(initial, 'current');
       return initial;
@@ -126,15 +165,27 @@ export function openStore(indexed = globalThis.indexedDB, name = 'snacklab6:' + 
       const state = validateSnapshot(stored);
       if (change(state, catalogueFor(state)) === false) return false;
       const next = validateSnapshot(state);
+      checkpoint(bucket, stored);
       bucket.put(next, 'current');
       return next;
     }),
     replace: incoming => transaction('readwrite', 'current', (stored, bucket) => {
-      if (stored !== undefined) bucket.put(stored, 'previous');
-      bucket.put(incoming, 'current');
-      return incoming;
+      const next = validateSnapshot(incoming);
+      if (stored !== undefined) {
+        let previous;
+        try { previous = validateSnapshot(stored); } catch { /* Keep unreadable data available as a raw export. */ }
+        if (previous) {
+          bucket.put(previous, 'previous');
+          checkpoint(bucket, previous);
+        } else bucket.put(stored, 'unreadable');
+      }
+      bucket.put(next, 'current');
+      return next;
     }),
-    previous: () => transaction('readonly', 'previous', stored => stored === undefined ? null : validateSnapshot(stored))
+    previous: () => validCopy('previous'),
+    recovery: async () => await validCopy('checkpoint') ?? await validCopy('previous'),
+    rawCurrent: () => raw('current'),
+    rawUnreadable: () => raw('unreadable')
   };
 }
 
@@ -174,8 +225,22 @@ export async function serializeBackup(state) {
     data: { ...state, customRecipes } });
 }
 
+export function serializeRawSnapshot(snapshot) {
+  return JSON.stringify({ format:'SnackLab-noodexport', exportedAt:new Date().toISOString(), data:snapshot }, (_key, value) => {
+    if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+      const bytes = value instanceof ArrayBuffer ? new Uint8Array(value) :
+        new Uint8Array(value.buffer,value.byteOffset,value.byteLength);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i,i+8192));
+      return { type:value.constructor.name, encoding:'base64', data:btoa(binary) };
+    }
+    return value;
+  }, 2);
+}
+
 export function deserializeBackup(raw) {
   const parsed = JSON.parse(raw);
+  if (parsed?.format === 'SnackLab-noodexport') throw new Error('Dit is een technische noodexport. Gebruik een gewone back-up of het herstelpunt.');
   if (parsed?.format !== snapshotFormat) return validateSnapshot(parsed);
   const { data } = parsed;
   if (parsed.version !== 6 || !isObject(data) || data.schemaVersion !== 6 ||

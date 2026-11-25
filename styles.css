@@ -463,6 +463,20 @@ details[open] > summary .toggle-icon { transform: rotate(180deg); }
   text-align: center;
   pointer-events: none;
 }
+.toast-undo.button {
+  margin-inline-start: .35rem;
+  background: var(--leaf);
+  color: var(--deep);
+  border-color: var(--leaf);
+  pointer-events: auto;
+}
+.label-status {
+  margin: .45rem 0;
+  color: var(--muted);
+  font-size: .85rem;
+}
+.label-risk { color: var(--red); font-weight: 700; }
+.recipe-label-status { margin-top: .55rem; }
 nav {
   position: fixed;
   z-index: 5;

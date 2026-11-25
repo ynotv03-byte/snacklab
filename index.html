@@ -32,7 +32,10 @@
     <p>SnackLab wordt geladen…</p>
     <noscript><p>Schakel JavaScript in om SnackLab te gebruiken.</p></noscript>
   </main>
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="toast" id="toast" hidden>
+    <span id="toast-message" role="status" aria-live="polite"></span>
+    <button class="button toast-undo" id="toast-undo" type="button" hidden>Ongedaan maken</button>
+  </div>
   <nav id="nav" aria-label="Hoofdnavigatie"></nav>
 </body>
 </html>

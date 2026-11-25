@@ -7,7 +7,7 @@ import {
   addDays, dailyEntries, emptyWeek, monday, moments, practical, secondsLeft, stepMinutes, timerLabel,
   weekdays, workProfile, workSlots, workoutAfterShift, workSuggestions, nutritionTotal, strategies,
   newRecipe, newWorkProfile, units, allergenOptions, storageOptions, hazelnutOptions, labelCheckText,
-  knownRiskText, coldText, filterFlags, workEligible
+  knownRiskText, coldText, filterFlags, workEligible, sportWeekConflict
 } from './model.js';
 
 export const h = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[ch]);
@@ -50,6 +50,13 @@ export function safety(recipe) {
     `<p class="note safety-note">${labelCheckText}</p>`;
 }
 
+export function labelStatus(recipe, state) {
+  if (hazelnutRisk(recipe)) return '<p class="label-status label-risk">Hazelnoot of mogelijke sporen opgegeven</p>';
+  const date = state.allergenReviews[recipe.id];
+  return date ? `<p class="label-status">Door jou gecontroleerd op <time datetime="${date}">${h(dateTitle(date))} ${date.slice(0,4)}</time></p>` :
+    '<p class="label-status">Etiket nog te controleren</p>';
+}
+
 export function personalToday(state, date) {
   const profile = workProfile(state, date);
   const items = dailyEntries(state, date);
@@ -88,7 +95,8 @@ export function workCopy(state, date) {
         ${recipe.image ? `<img src="${h(recipe.image)}" alt="" loading="lazy" width="480" height="480">` : ''}
         <div><h3>${smallRecipeLink(recipe, 1)}</h3><p class="note">${recipe.minutes} min · ${metric(recipe.protein)} eiwit</p>
         <p class="note">${h(info.note || (info.storage === 'shelf' ? 'Volg de bewaarvoorschriften op de verpakking.' : 'Vervoer en bewaar gekoeld.'))}</p>
-        ${act('work-grocery', 'Naar boodschappen', `data-id="${recipe.id}"${no(count >= maxPortions)}`)}</div>
+        ${labelStatus(recipe,state)}
+        ${act('work-grocery', 'Voeg toe aan boodschappen', `data-id="${recipe.id}"${no(count >= maxPortions)}`)}</div>
       </article>`;
     }).join('')}</div>` : `<div class="empty"><h3>Geen passende snacks</h3><p>Bekijk je voorbereidingstijd en koeling of voeg een eigen meeneemrecept met bewaaradvies toe.</p>${link('#recipeedit', 'Recept toevoegen')}</div>`}
   </section>
@@ -242,7 +250,7 @@ export function weekView(state, key) {
     </form>
     ${week.entries.length ? `<section class="panel week-overview block"><h2>Geplande snacks deze week</h2>
       ${totalsList(week.entries)}<p class="note">Geschatte subtotalen voor je geplande snacks. Lege of onbekende waarden tellen niet mee. Dit is geen overzicht van al je voeding.</p>
-      <div class="button-row">${act('week-grocery',synced ? 'Weekboodschappen bijwerken' : 'Naar boodschappen',`data-key="${key}"`,'primary')}${synced ? link('#grocery','Bekijk boodschappen') : ''}</div>
+      <div class="button-row">${act('week-grocery',synced ? 'Weekboodschappen bijwerken' : 'Zet week op boodschappenlijst',`data-key="${key}"`,'primary')}${synced ? link('#grocery','Bekijk boodschappen') : ''}</div>
     </section>` : ''}
     <div class="week-strip" role="group" aria-label="Ga naar een dag in deze week">
       ${weekdays.map((name, i) => {
@@ -258,7 +266,7 @@ export function weekView(state, key) {
       return `<section class="panel weekday-panel" id="weekday-${date}" tabindex="-1">
         <div class="section-head"><h2>${cap(dateTitle(date))}</h2>${work ? `<a href="#work/${date}">Werkdag</a>` : ''}</div>
         ${trainings.length ? `<p class="note">${trainings.map(plan => `<a href="#food/${h(plan.id)}">${h(plan.sport)} · ${plan.time}</a>`).join(' / ')}</p>` : ''}
-        ${weekdayEntries.length ? `<div class="slot-list">${weekdayEntries.map(entry => weekSlot(entry,key,
+        ${weekdayEntries.length ? `<div class="slot-list">${weekdayEntries.map(entry => weekSlot(state,entry,key,
           entry.kind === 'work' ? workProfile(state,entry.id.slice(0,10)) ?? work : null)).join('')}</div>
           <details class="day-totals" data-keep-open id="totals-${date}"><summary>Voedingswaarden van deze snacks</summary>${totalsList(weekdayEntries)}</details>` :
           '<p class="note">Geen snacks ingepland.</p>'}
@@ -266,7 +274,7 @@ export function weekView(state, key) {
     }).join('')}</div>`;
 }
 
-function weekSlot(entry, key, work) {
+function weekSlot(state, entry, key, work) {
   const recipe = byId.get(entry.recipeId);
   const changedShift = recipe && entry.kind === 'work' && work && !workEligible(recipe,work);
   return `<article class="week-slot">
@@ -274,6 +282,8 @@ function weekSlot(entry, key, work) {
     ${recipe ? `<p class="note">${formatPortions(entry.portions)}${recipe.archived ? ' · verwijderd recept' : ''}</p>` : ''}
     ${recipe && hazelnutRisk(recipe) ? `<p class="notice">${knownRiskText}</p>` : changedShift ?
       '<p class="notice">Controleer koeling, bereidingstijd en je werkprofiel. Het huidige recept past niet bij deze dienst.</p>' : ''}
+    ${recipe && !hazelnutRisk(recipe) ? labelStatus(recipe,state) : ''}
+    ${sportWeekConflict(state,entry) ? '<p class="notice">Vastgezette keuze wijkt af van je training. Maak los om Sportvoeding te volgen.</p>' : ''}
     ${entry.reason ? `<p class="note">${h(entry.reason)}</p>` : ''}</div>
     <div class="button-row">
       ${link('#weekedit/' + key + '/' + entry.id,'Aanpassen')}
@@ -298,6 +308,7 @@ export function weekEditor(state, key, id) {
       ${select('recipeId','Recept',[['','Nog te kiezen'],...recipes.map(recipe => [recipe.id,recipe.name])],old?.recipeId ?? '')}
       ${num('portions','Porties',old?.portions ?? 1,.5,maxPortions,.5,true)}
       <div data-week-portion-preview>${weekPortionPreview(old?.recipeId,old?.portions ?? 1)}</div>
+      ${old?.planId ? '<p class="note">Dit moment volgt Sportvoeding. Zet het vast om een eigen keuze of tijd te bewaren.</p>' : ''}
       ${toggle('pinned','Vastzetten voor deze week',old?.pinned ?? true)}
       ${status}<div class="button-row">${submit('Snackmoment opslaan')}
       ${old ? act('week-remove','Verwijder moment',`data-key="${key}" data-id="${h(id)}"`,'text-button danger') : ''}</div>
@@ -366,7 +377,7 @@ export function cookingView(recipe, state, session) {
   }).join('');
   const done = session.complete;
   return `<div class="cooking-shell">
-    <header class="cook-header"><a class="button" href="#recipe/${recipe.id}">Sluiten</a>
+    <header class="cook-header"><a class="button" href="#recipe/${recipe.id}" data-cook-back>Sluiten</a>
       <span id="wake-status" class="note">Scherm actief houden indien mogelijk</span></header>
     <div class="cook-intro"><span class="date-label">Kookmodus</span><h1>${h(recipe.name)}</h1>
       <label for="cook-progress">${done ? 'Afgerond' : index === -1 ? 'Ingrediënten klaarzetten' : 'Stap ' + (index + 1) + ' van ' + recipe.steps.length}</label>
@@ -402,7 +413,7 @@ export function cookingView(recipe, state, session) {
       </div>
     </details>
     ${index >= 0 && !done ? `<details class="panel form-section" id="cook-ingredients" data-keep-open><summary>Ingrediënten terugkijken</summary><div class="section-body"><ul class="cook-list">${checklist}</ul></div></details>` : ''}
-    <div class="cook-controls">${done ? link('#recipe/'+recipe.id,'Terug naar recept','primary') :
+    <div class="cook-controls">${done ? `<a class="button primary" href="#recipe/${recipe.id}" data-cook-back>Terug naar recept</a>` :
       `${act('cook-step','Vorige',`data-step="-1"${no(index < 0)}`)}
       ${act('cook-step',index === -1 ? 'Begin met koken' : index === last ? 'Klaar' : 'Volgende stap','data-step="1"','primary')}`}</div>
   </div>`;

@@ -1,5 +1,6 @@
 import { newId } from './core.js';
 import { h } from './screens.js';
+import { syncSportWeeks } from './model.js';
 import { exerciseById, exercises, findExercises, groups, equipmentTypes, loadLabels, presets } from './exercises.js';
 import { drawExercise } from './exercise-motion.js';
 import { chronological, completedSets, copyTargets, currentSession, exerciseHistory, finishSession, fromRoutine,
@@ -633,13 +634,14 @@ export function attachGym(main,api) {
     }
     if (operation === 'plan') {
       const targets = editorData(form);
-      if (await save(state => {
+      if (await save((state,catalogue) => {
         const editing = form.dataset.edit === 'true';
         if (!editing && state.gym.sessions.length >= 3000) throw new Error('Je trainingslogboek is vol.');
         const previous = editing ? sessionFor(state,id,'planned') : { ...newGymSession(),id };
         const session = validateSession({ ...previous,name:values.get('name'),date:values.get('date'),time:values.get('time'),
           duration:Number(values.get('duration')),notes:values.get('notes'),items:targets });
         linkAgenda(state,session,values.has('agenda'));
+        if (session.agenda) syncSportWeeks(state,session.agenda,catalogue);
         if (editing) state.gym.sessions[state.gym.sessions.indexOf(previous)] = session;
         else state.gym.sessions.push(session);
         const name = String(values.get('save-routine') ?? '').trim();
