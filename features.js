@@ -159,6 +159,7 @@ export function attachFeatures(main, api) {
         ingredients: ingredientsFrom(form), steps: stepsFrom(form),
         nutrition: Object.fromEntries(nutrientKeys.map(key => [key, numberOrNull(values.get(key))])),
         nutritionSource: values.get('nutritionSource'), vegetableGrams: numberOrNull(values.get('vegetableGrams')),
+        fruitGrams: numberOrNull(values.get('fruitGrams')),
         allergens: values.getAll('allergens'),
         labelsReviewed: values.has('labelsReviewed'), hazelnut: values.get('hazelnut'), storage: values.get('storage'),
         keep: values.get('keep'), portable: values.has('portable'), heat: values.has('heat'), moments: values.getAll('moments'),

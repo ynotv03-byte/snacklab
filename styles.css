@@ -665,3 +665,38 @@ nav {
   :is(.recipe-portion .nutrition, .nutrition-compact) > div { grid-column: span 2; }
   :is(.recipe-portion .nutrition, .nutrition-compact) > div:nth-last-child(-n+2) { grid-column: span 3; }
 }
+
+.produce-meters {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: .55rem;
+}
+.produce-meter {
+  display: flex;
+  flex-direction: column;
+  gap: .32rem;
+  min-width: 0;
+  padding: .65rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.produce-meter.fruit { background: #fbf1e6; border-color: #eddbc9; }
+.produce-meter label { display: grid; gap: .16rem; margin: 0; }
+.produce-meter label strong, .produce-meter > strong { color: var(--deep); }
+.produce-meter label span { font-size: .92rem; line-height: 1.35; }
+.produce-meter small, .produce-unknown { color: var(--muted); line-height: 1.35; }
+.produce-unknown { font-size: .88rem; }
+:is(.veg-today,.veg-log-meter,.veg-portion) .produce-meter progress { margin: .1rem 0; }
+:is(.veg-today,.veg-log-meter,.veg-portion) .fruit progress { accent-color: #a7552d; }
+:is(.veg-today,.veg-log-meter,.veg-portion) .fruit progress::-webkit-progress-value { background: #a7552d; }
+:is(.veg-today,.veg-log-meter,.veg-portion) .fruit progress::-moz-progress-bar { background: #a7552d; }
+.produce-portion h3 { margin-bottom: .5rem; }
+.produce-entry-amounts { display: flex; flex-wrap: wrap; gap: .4rem; }
+.veg-entry > .produce-entry-amounts { flex: 0 1 auto; }
+.veg-entry .produce-entry-amounts input { width: min(6.6rem,100%); }
+.veg-add form > .field { margin-bottom: .65rem; }
+@media (max-width: 360px) {
+  .produce-meter { padding-inline: .5rem; }
+  .produce-meter label span { font-size: .83rem; }
+}

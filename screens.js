@@ -2,7 +2,7 @@ import { byId, formatIngredient, formatPortions, metric, nutrientKeys, nutrientL
   maxPortions, localDate, sports, intensities, textures, hazelnutRisk } from './core.js';
 import { groceryGroups } from './data.js';
 import { ingredientsLibrary } from './ingredients.js';
-import { recipeVegetables } from './vegetables.js';
+import { recipeProduce, loggableProduce } from './vegetables.js';
 import {
   addDays, dailyEntries, emptyWeek, monday, moments, practical, secondsLeft, stepMinutes, timerLabel,
   weekdays, workProfile, workSlots, workoutAfterShift, workSuggestions, nutritionTotal, strategies,
@@ -183,7 +183,8 @@ export function ownEditor(state, id, copy = false) {
     ${details('Voedingswaarden per portie', `<p class="note">Laat onbekende waarden leeg. Je kunt een schatting maken met ingrediënten uit de lokale USDA-bibliotheek en waarden daarna zelf corrigeren.</p>
       <div class="fields">${nutrientKeys.map(key => num(key,cap(nutrientLabels[key]) + (key === 'kcal' ? '' : ' (g)'),draft.nutrition[key],0,key === 'kcal' ? 12000 : 1500,'any')).join('')}</div>
       ${num('vegetableGrams','Groente per portie (g)',draft.vegetableGrams,0,10000,'any')}
-      <p class="note">Laat leeg voor een automatische schatting. Vul bij onbekende of gemengde ingrediënten zelf het eetbare groentegewicht in. Fruit telt apart.</p>
+      ${num('fruitGrams','Fruit per portie (g)',draft.fruitGrams,0,10000,'any')}
+      <p class="note">Laat leeg voor een automatische schatting. Vul bij onbekende of gemengde ingrediënten zelf het eetbare gewicht per soort in.</p>
       <input type="hidden" name="nutritionSource" value="${h(draft.nutritionSource)}">${act('estimate','Schat uit ingrediënten')}
       <p class="note" data-estimate role="status"></p>`)}
     ${details('Allergenen en bewaren', `<fieldset><legend>Opgegeven allergenen</legend><div class="chip-checks">${allergenOptions.map(key => toggle('allergens',cap(key),draft.allergens.includes(key),key)).join('')}</div></fieldset>
@@ -306,10 +307,10 @@ export function weekEditor(state, key, id) {
 export function weekPortionPreview(id, n) {
   const recipe = id !== '' && byId.get(Number(id));
   if (!recipe || !Number.isFinite(n) || n < .5 || n > maxPortions || !Number.isInteger(n * 2)) return '';
-  const veg = recipeVegetables(recipe,n);
-  return portionNutrition(scaleNutrition(recipe,n),true) + `<p class="note">${
-    veg.unknown ? 'Een deel van het groentegewicht is onbekend.' :
-      (veg.estimated ? '≈ ' : '') + metric(veg.grams) + ' groente'}</p>`;
+  const { vegetable,fruit } = recipeProduce(recipe,n);
+  const preview = [[vegetable,'groente'],[fruit,'fruit']].map(([info,label]) =>
+    info.unknown ? label + ': deels onbekend' : (info.estimated ? '≈ ' : '') + metric(info.grams) + ' ' + label);
+  return portionNutrition(scaleNutrition(recipe,n),true) + `<p class="note">${preview.join(' · ')}</p>`;
 }
 
 const flagsLabels = { favorite:'Favorieten', untried:'Nog te proberen', positive:'Beoordeling 4 of 5 sterren',
@@ -354,7 +355,7 @@ export function filterDialog(state, filter) {
 
 export function cookingView(recipe, state, session) {
   const n = session.servings;
-  const veg = recipeVegetables(recipe,n);
+  const produce = loggableProduce(recipeProduce(recipe,n));
   const last = recipe.steps.length - 1;
   const index = Math.min(session.step,last);
   const minutes = stepMinutes(recipe,index);
@@ -377,7 +378,7 @@ export function cookingView(recipe, state, session) {
       ${select('cook-rating','Jouw beoordeling',[[0,'Geen beoordeling'], ...[1,2,3,4,5].map(i=>[i,i+' '+(i===1?'ster':'sterren')])],state.ratings[recipe.id] ?? 0,'data-cook-rating')}
       ${act('cook-favorite',state.favorites.includes(recipe.id) ? 'Favoriet opgeslagen' : 'Bewaar als favoriet',
         `aria-pressed="${state.favorites.includes(recipe.id)}"`)}
-      ${!veg.unknown && veg.grams > 0 ? `<button type="button" class="button" data-action="veg-eaten" data-id="${recipe.id}">Vandaag gegeten</button>` : ''}
+      ${produce.grams || produce.fruitGrams ? `<button type="button" class="button" data-action="veg-eaten" data-id="${recipe.id}">Vandaag gegeten</button>` : ''}
       ${act('cook-reset','Opnieuw koken','', 'text-button')}
     </section>` : index === -1 ? `<section class="panel cook-current">
       <div class="section-head"><h2>Ingrediënten</h2>

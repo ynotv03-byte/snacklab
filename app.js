@@ -14,8 +14,8 @@ import { attachFeatures } from './features.js';
 import { attachGym, gymPages, gymView } from './gym-ui.js';
 import { liveSession, chronological, syncGymAgenda } from './gym-model.js';
 import { snackUse } from './snack-use.js';
-import { groceryVegetables, recipeVegetables, validateBody, validateVegetableEntry, maxVegetableEntries } from './vegetables.js';
-import { vegetableCaption, vegetableGrocery, vegetableLog, vegetablePortion, vegetableProfile, vegetableToday } from './vegetables-ui.js';
+import { groceryProduce, recipeProduce, loggableProduce, validateBody, validateProduceEntry, maxProduceEntries } from './vegetables.js';
+import { produceCaption, produceGrocery, produceLog, producePortion, produceProfile, produceToday } from './vegetables-ui.js';
 
 const main = document.querySelector('main');
 const nav = document.querySelector('nav');
@@ -34,7 +34,7 @@ let activePlan;
 let recipeVisit;
 let portions = {};
 let groceryDraft = { name: '', group: 'Overig' };
-let savingVegetables = false;
+let savingProduce = false;
 let agendaView = 'upcoming';
 let foodPhase = 'pre';
 const catalogue = { query: '', taste: '', filters: new Set(), sort: 'taste' };
@@ -149,9 +149,9 @@ function route() {
   if (gymPages.includes(name) && [id, sub, set].every(key => !key || /^[\w-]{1,90}$/.test(key))) return { name, id, sub, set };
   if (['recipe', 'cook'].includes(name) && id !== undefined && byId.has(Number(id))) return { name, id: Number(id) };
   if (name === 'work') return { name, id: validDate(id) ? id : localDate() };
-  if (name === 'groente') {
+  if (name === 'groente' || name === 'dagmeter') {
     const today = localDate();
-    return { name, id: validDate(id) && id <= today ? id : today };
+    return { name: 'dagmeter', id: validDate(id) && id <= today ? id : today };
   }
   if (name === 'week' || name === 'weekedit') return { name, id: monday(validDate(id) ? id : localDate()), sub };
   if (['recipeedit','recipecopy'].includes(name)) return { name, id: Number(id) || null };
@@ -166,7 +166,7 @@ function go(hash) {
 
 function render() {
   let selectedTab = current.name;
-  if (selectedTab === 'groente') selectedTab = 'home';
+  if (selectedTab === 'dagmeter') selectedTab = 'home';
   if (['recipe','recipeedit','recipecopy','own','cook'].includes(selectedTab)) selectedTab = 'recipes';
   if (['food','edit','week','weekedit','work',...gymPages].includes(selectedTab)) selectedTab = 'agenda';
   if (['workprofiles','workedit'].includes(selectedTab)) selectedTab = 'profile';
@@ -176,7 +176,7 @@ function render() {
     ${name === 'grocery' && count ? `<span class="nav-count" aria-hidden="true">${count}</span>` : ''}</span>
     <span>${label}</span></a>`).join('')}</div>`;
   const views = { home, recipes: catalogueView, recipe: recipeView, grocery, agenda, food, edit, profile,
-    groente: () => vegetableLog(db,current.id),
+    dagmeter: () => produceLog(db,current.id),
     work: () => workView(db,current.id), workprofiles: () => workProfilesView(db), workedit: () => workEditor(db,current.id),
     week: () => weekView(db,current.id), weekedit: () => weekEditor(db,current.id,current.sub ?? 'new'),
     own: () => ownList(db), recipeedit: () => ownEditor(db,current.id), recipecopy: () => ownEditor(db,current.id,true),
@@ -202,13 +202,13 @@ function favourite(recipe) {
 
 function recipeCard(recipe) {
   const title = current.name === 'recipes' ? 'h2' : 'h3';
-  const vegetables = recipeVegetables(recipe);
+  const produce = produceCaption(recipeProduce(recipe),true);
   return `<article class="recipe-card">
     <a href="#recipe/${recipe.id}" class="recipe-card-link" data-recipe-link>
       <div class="recipe-frame">${photo(recipe)}</div>
       <div class="recipe-copy"><${title}>${escapeHtml(recipe.name)}</${title}>
         <p>${icon('clock')} ${recipe.minutes} min <span aria-hidden="true">·</span> ${Number.isFinite(recipe.protein) ? metric(recipe.protein) + ' eiwit' : 'Eiwit onbekend'}</p>
-        ${vegetables.grams > 0 ? `<p class="recipe-vegetables">${vegetableCaption(vegetables)}</p>` : ''}
+        ${produce ? `<p class="recipe-vegetables">${produce}</p>` : ''}
         ${hazelnutRisk(recipe) ? '<small class="allergen-tag">Hazelnoot of sporen genoemd</small>' : ''}</div>
     </a>${favourite(recipe)}
   </article>`;
@@ -240,7 +240,7 @@ function home() {
   ];
   return `<div class="page-heading intro"><p class="date-label">${cap(dateLong.format(new Date()))}</p><h1>Vandaag</h1></div>
     ${personalToday(db,today)}
-    ${vegetableToday(db)}
+    ${produceToday(db)}
     <article class="hero">
       <div class="hero-photo" data-recipe="${featured.id}">${photo(featured, { priority: true, cls: 'hero-image' })}</div>
       <div class="hero-copy"><span class="eyebrow">${personalized ? 'Voor jou' : 'Receptsuggestie'}</span>
@@ -357,7 +357,7 @@ function recipeView() {
         </div></div>
         ${portionNutrition(nutrition)}
         <p class="note">${nutritionNote}${recipe.custom && recipe.nutritionSource === 'estimate' ? ' Berekend met de lokale USDA-bibliotheek.' : ''}</p>
-        ${vegetablePortion(db,recipe,recipeVegetables(recipe,n))}
+        ${producePortion(db,recipe,recipeProduce(recipe,n))}
     </section>
     ${snackUseCard(recipe, nutrition, n)}
     <div class="detail-grid">
@@ -396,7 +396,7 @@ function grocery() {
         <label class="field"><span>Categorie</span><select name="group">${options(groceryGroups.map(x => [x, x]), groceryDraft.group)}</select></label>
         <button class="button primary" type="submit">${icon('plus')} Toevoegen</button>
       </form>
-      ${sources.length || weekKeys.length ? vegetableGrocery(groceryVegetables(db.grocery,byId)) : ''}
+      ${sources.length || weekKeys.length ? produceGrocery(groceryProduce(db.grocery,byId)) : ''}
       ${rows.length ? `<div class="shopping-progress">
         <label for="shop-progress">${bought} van ${rows.length} afgevinkt</label>
         <progress id="shop-progress" value="${bought}" max="${rows.length}"></progress>
@@ -416,13 +416,13 @@ function grocery() {
               </select></label>
               ${button('grocery-remove', 'Verwijder', `data-id="${id}" aria-label="Verwijder ${escapeHtml(recipe.name)} uit boodschappen"`, 'text-button')}
             </div><div class="source-preview">${portionNutrition(scaleNutrition(recipe,n),true)}
-              <p class="note">${vegetableCaption(recipeVegetables(recipe,n))}</p></div></div>`;
+              <p class="note">${produceCaption(recipeProduce(recipe,n))}</p></div></div>`;
         }).join('')}
       </details>` : ''}
       ${weekKeys.length ? `<details class="panel form-section" id="grocery-weeks" data-keep-open>
         <summary>Weekboodschappen</summary><div class="section-body"><ul class="clean-list">
         ${weekKeys.sort().map(key => `<li><span><a href="#week/${key}">Week van ${escapeHtml(dateLabel(key))}</a>
-          <small class="veg-week-amount">${vegetableCaption(groceryVegetables({recipes:db.grocery.weekImports[key]},byId))}</small></span>
+          <small class="veg-week-amount">${produceCaption(groceryProduce({recipes:db.grocery.weekImports[key]},byId))}</small></span>
           <button class="button text-button danger" type="button" data-v6="week-unimport" data-key="${key}">Haal van lijst</button></li>`).join('')}
         </ul></div></details>` : ''}
       </div>
@@ -624,7 +624,7 @@ function profile() {
   } catch { /* The status message above gives the recovery path. */ }
   return heading('Profiel') +
     `<div class="detail-grid profile-grid">
-      ${vegetableProfile(db)}
+      ${produceProfile(db)}
       <section class="panel profile-work"><h2>Werkprofielen</h2><p>Stel je diensten, pauzes, koeling en voorbereidingstijd in voor persoonlijke suggesties.</p>
         <a class="button primary" href="#workprofiles">Werkprofielen beheren</a></section>
       <section class="panel"><h2>Mijn smaak</h2>
@@ -642,7 +642,7 @@ function profile() {
         <p class="note">Bij een kort tijdsvenster krijgt een kleine, lichtere portie voorrang.</p>
       </section>
       <section class="panel"><h2>Mijn gegevens</h2>
-        <p>Je recepten, foto’s, weekplannen, trainingen, groentelogboek en instellingen staan op dit apparaat. Exporteer een JSON-back-up om ze te bewaren of naar een ander apparaat te verplaatsen.</p>
+        <p>Je recepten, foto’s, weekplannen, trainingen, eetlogboek en instellingen staan op dit apparaat. Exporteer een JSON-back-up om ze te bewaren of naar een ander apparaat te verplaatsen.</p>
         <div class="button-row">
           ${button('backup', 'Exporteer back-up', '', 'primary')}
           ${issues.read ? button('download-raw', 'Download oorspronkelijke gegevens') : ''}
@@ -874,25 +874,25 @@ main.addEventListener('click', async event => {
       portions[recipeId] = Math.min(maxPortions, Math.max(.5, (portions[recipeId] ?? 1) + amount));
       break;
     case 'veg-eaten': {
-      if (savingVegetables) return;
+      if (savingProduce) return;
       const date = localDate();
       const n = current.name === 'cook' ? db.cooking[recipeId]?.servings ?? 1 : portions[recipeId] ?? 1;
-      savingVegetables = true;
+      savingProduce = true;
       try {
         changed = await update((state, catalogue) => {
           const recipe = catalogue.get(recipeId);
           if (!recipe) return false;
-          const info = recipeVegetables(recipe);
-          if (info.unknown || !info.grams) return false;
-          appendVegetables(state,{ id:newId(), date, name:recipe.name, recipeId, portions:n, grams:info.grams, estimated:info.estimated });
-        }, 'Toegevoegd aan je groentemeter.');
+          const amounts = loggableProduce(recipeProduce(recipe));
+          if (!amounts.grams && !amounts.fruitGrams) return false;
+          appendProduce(state,{ id:newId(), date, name:recipe.name, recipeId, portions:n, ...amounts });
+        }, 'Toegevoegd aan je dagmeter.');
       } finally {
-        savingVegetables = false;
+        savingProduce = false;
       }
       break;
     }
     case 'veg-remove':
-      changed = await update(state => { state.vegetables.entries = state.vegetables.entries.filter(entry => entry.id !== id); }, 'Verwijderd uit je groentemeter.');
+      changed = await update(state => { state.vegetables.entries = state.vegetables.entries.filter(entry => entry.id !== id); }, 'Verwijderd uit je dagmeter.');
       break;
     case 'grocery-add':
       changed = await update(state => {
@@ -1042,20 +1042,20 @@ main.addEventListener('change', async event => {
   if (issues.write && !main.querySelector('.notice')) main.insertAdjacentHTML('afterbegin', storageNotice());
 });
 
-function appendVegetables(state, entry) {
-  if (state.vegetables.entries.length >= maxVegetableEntries) throw new Error('Je groentelogboek is vol. Verwijder eerst een regel.');
-  state.vegetables.entries.push(validateVegetableEntry(entry));
+function appendProduce(state, entry) {
+  if (state.vegetables.entries.length >= maxProduceEntries) throw new Error('Je eetlogboek is vol. Verwijder eerst een regel.');
+  state.vegetables.entries.push(validateProduceEntry(entry));
 }
 
-async function handleVegetableForm(form, values) {
+async function handleProduceForm(form, values) {
   if (form.id === 'veg-date-form') {
     const date = String(values.get('date'));
-    if (validDate(date)) go('#groente/' + date);
+    if (validDate(date)) go('#dagmeter/' + date);
     return;
   }
-  if (savingVegetables) return;
+  if (savingProduce) return;
   const nullable = key => values.get(key) === '' ? null : Number(values.get(key));
-  savingVegetables = true;
+  savingProduce = true;
   const submit = form.querySelector('button[type="submit"]');
   submit.disabled = true;
   try {
@@ -1063,25 +1063,28 @@ async function handleVegetableForm(form, values) {
     const saved = await update(state => {
       if (profile) Object.assign(state.vegetables,validateBody(nullable('height'),nullable('weight')));
       else if (form.id === 'veg-eaten-form') {
-        const name = String(values.get('meal') ?? '').trim() || 'Groente uit andere maaltijden';
-        appendVegetables(state,{id:newId(),date:form.dataset.date,name,recipeId:null,grams:Number(values.get('grams'))});
+        const name = String(values.get('meal') ?? '').trim() || 'Groente en fruit uit andere maaltijden';
+        appendProduce(state,{id:newId(),date:form.dataset.date,name,recipeId:null,
+          grams:Number(values.get('grams')),fruitGrams:Number(values.get('fruitGrams'))});
       } else {
         const at = state.vegetables.entries.findIndex(entry => entry.id === form.dataset.vegEdit);
         if (at < 0) return false;
         const entry = state.vegetables.entries[at];
-        const key = entry.recipeId === null ? 'grams' : 'portions';
-        state.vegetables.entries[at] = validateVegetableEntry({ ...entry, [key]:Number(values.get('amount')) });
+        const amounts = entry.recipeId === null ? { grams:Number(values.get('grams')),fruitGrams:Number(values.get('fruitGrams')) } :
+          { portions:Number(values.get('amount')) };
+        state.vegetables.entries[at] = validateProduceEntry({ ...entry, ...amounts });
       }
-    },profile ? 'Profiel opgeslagen.' : 'Je groentemeter is bijgewerkt.',form);
+    },profile ? 'Profiel opgeslagen.' : 'Je dagmeter is bijgewerkt.',form);
     if (saved && form.isConnected) {
       redraw();
       if (profile) formFocus('veg-profile-form','height');
-      else if (form.id === 'veg-eaten-form') formFocus('veg-eaten-form','grams');
-      else [...main.querySelectorAll('[data-veg-edit]')].find(item => item.dataset.vegEdit === form.dataset.vegEdit)?.elements.amount.focus({ preventScroll:true });
+      else if (form.id === 'veg-eaten-form') formFocus('veg-eaten-form', Number(values.get('grams')) > 0 ? 'grams' : 'fruitGrams');
+      else [...main.querySelectorAll('[data-veg-edit]')].find(item => item.dataset.vegEdit === form.dataset.vegEdit)
+        ?.querySelector('select[name="amount"], input[name="grams"]')?.focus({ preventScroll:true });
     }
   } finally {
     submit.disabled = false;
-    savingVegetables = false;
+    savingProduce = false;
   }
 }
 
@@ -1091,7 +1094,7 @@ main.addEventListener('submit', async event => {
   const values = new FormData(form);
   if (['veg-profile-form','veg-eaten-form','veg-date-form'].includes(form.id) || form.dataset.vegEdit) {
     event.preventDefault();
-    await handleVegetableForm(form,values);
+    await handleProduceForm(form,values);
     return;
   }
   if (form.id === 'grocery-form') {
