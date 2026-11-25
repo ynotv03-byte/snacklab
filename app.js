@@ -2,7 +2,7 @@ import { recipes, groceryGroups } from './data.js';
 import {
   storageKey, legacyKey, restoreKey, newId, newPlan, validDate, parseTime, hazelnutRisk, metric,
   byId, sports, muscles, intensities, sizes, textures, phases, maxPortions, localDate, planError, timing,
-  formatTime, formatPortions, formatIngredient, scaleNutrition, searchRecipes,
+  formatTime, formatPortions, formatIngredient, scaleNutrition, nutrientLabels, searchRecipes,
   groceryRows, setGroceryPortions, shoppingText, sportAdvice
 } from './core.js';
 
@@ -12,6 +12,7 @@ import { personalToday, workView, workProfilesView, workEditor, weekView, weekEd
 import { attachFeatures } from './features.js';
 import { attachGym, gymPages, gymView } from './gym-ui.js';
 import { liveSession, chronological, syncGymAgenda } from './gym-model.js';
+import { snackUse } from './snack-use.js';
 
 const main = document.querySelector('main');
 const nav = document.querySelector('nav');
@@ -289,6 +290,28 @@ function catalogueResults() {
       button('reset-search', 'Toon alle recepten'));
 }
 
+function snackUseCard(recipe, nutrition, n) {
+  const use = snackUse(recipe, nutrition);
+  if (!use) return '';
+  const portion = formatPortions(n);
+  const factHeading = recipe.custom && recipe.nutritionSource !== 'estimate' ?
+    'Jouw invoer · ' + portion : 'Geschat voor ' + portion;
+  return `<section class="panel snack-use" aria-labelledby="snack-use-title">
+    <div class="snack-use-copy">
+      <h2 id="snack-use-title">Wanneer past deze snack?</h2>
+      <h3>${escapeHtml(use.moment)}</h3>
+      <p>${escapeHtml(use.explanation)}</p>
+      ${use.source ? `<a class="snack-use-source" href="${escapeHtml(use.source.url)}" target="_blank" rel="noopener">Voedingscentrum · ${escapeHtml(use.source.label)}</a>` : ''}
+    </div>
+    ${use.keys.length ? `<div class="snack-use-facts">
+      <p>${escapeHtml(factHeading)}</p>
+      <ul role="list">${use.keys.map(key => `<li>${key === 'kcal' ? metric(nutrition.kcal, 'kcal') :
+        metric(nutrition[key]) + ' ' + nutrientLabels[key]}</li>`).join('')}</ul>
+      ${!recipe.custom && n !== 1 ? '<p class="snack-use-portion-note">De tip gaat uit van 1 portie.</p>' : ''}
+    </div>` : ''}
+  </section>`;
+}
+
 function recipeView() {
   const recipe = byId.get(current.id);
   const n = portions[recipe.id] ?? 1;
@@ -314,6 +337,7 @@ function recipeView() {
       ${[['ingredients', 'Ingrediënten'], ['preparation', 'Bereiding'], ['nutrition', 'Voedingswaarden']].map(([id, title]) =>
         button('jump', title, `data-id="${id}"`, 'jump')).join('')}
     </div>
+    ${snackUseCard(recipe, nutrition, n)}
     <div class="detail-grid">
       <section class="panel" id="ingredients" tabindex="-1">
         <div class="section-head"><h2>Ingrediënten</h2><div class="stepper" role="group" aria-label="Porties">
