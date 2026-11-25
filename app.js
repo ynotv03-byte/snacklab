@@ -22,7 +22,7 @@ const nav = document.querySelector('nav');
 const toast = document.querySelector('#toast');
 const toastMessage = document.querySelector('#toast-message');
 const toastUndo = document.querySelector('#toast-undo');
-const appVersion = '6.6.0';
+const appVersion = '6.7.0';
 const issues = { read: '', write: '' };
 let db = blankSnapshot();
 const store = openStore();
@@ -441,6 +441,30 @@ function snackUseCard(recipe, nutrition, n) {
   </section>`;
 }
 
+const recipeTabs = [['nutrition','Voeding'], ['ingredients','Ingrediënten'], ['preparation','Bereiding']];
+
+function recipePanel(id, active, content) {
+  return `<section id="${id}" class="recipe-panel" role="tabpanel" aria-labelledby="recipe-tab-${id}" tabindex="0"${id === active ? '' : ' hidden'}>${content}</section>`;
+}
+
+function switchRecipeTab(selectedTab) {
+  if (selectedTab.getAttribute('aria-selected') === 'true') return;
+  const scroll = window.scrollY;
+  for (const tab of main.querySelectorAll('[data-recipe-tab]')) {
+    const selected = tab === selectedTab;
+    tab.setAttribute('aria-selected', selected);
+    tab.tabIndex = selected ? 0 : -1;
+    document.getElementById(tab.getAttribute('aria-controls')).hidden = !selected;
+  }
+  const panel = document.getElementById(selectedTab.getAttribute('aria-controls'));
+  panel.style.minBlockSize = '';
+  const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  // A shorter panel can otherwise clamp scroll just as the user taps a tab.
+  if (scroll > maxScroll) panel.style.minBlockSize = (panel.offsetHeight + Math.ceil(scroll - maxScroll)) + 'px';
+  if (window.scrollY !== scroll) window.scrollTo(0,scroll);
+  history.replaceState({ ...history.state, snacklabRecipeTab:selectedTab.dataset.recipeTab }, '');
+}
+
 function recipeView() {
   const recipe = byId.get(current.id);
   const n = portions[recipe.id] ?? 1;
@@ -452,58 +476,67 @@ function recipeView() {
   const plan = recipeVisit?.plan && planById(recipeVisit.plan);
   const cook = db.cooking[recipe.id];
   const cookLabel = cook?.complete ? 'Opnieuw koken' : cook ? 'Kookmodus hervatten' : 'Start kookmodus';
+  const requestedTab = history.state?.snacklabRecipeTab;
+  const active = recipeTabs.find(([id]) => id === requestedTab)?.[0] ?? recipeTabs[0][0];
   return `<a href="${escapeHtml(back)}" class="back" data-recipe-back>${icon('back')} ${backLabel}</a>
     <div class="detail-top">${photo(recipe, { priority: true })}
       <div class="detail-copy"><div class="detail-tags"><span class="badge">${cap(recipe.taste)}</span>
       <span>${icon('clock')} ${recipe.minutes} min</span></div>
       <h1>${escapeHtml(recipe.name)}</h1>${recipe.description ? `<p class="recipe-description">${escapeHtml(recipe.description)}</p>` : ''}${favourite(recipe)}</div></div>
     <div class="recipe-label-status">${labelStatus(recipe,db)}</div>
-    <div class="button-row recipe-actions">
-      <button class="button primary" type="button" data-v6="cook-open" data-id="${recipe.id}">${icon('book')} ${cookLabel}</button>
-      ${recipe.custom && !recipe.archived ? `<a class="button" href="#recipeedit/${recipe.id}">Bewerken</a>
-        <a class="button" href="#recipecopy/${recipe.id}">Dupliceren</a>
-        <button class="button text-button danger" type="button" data-v6="recipe-archive" data-id="${recipe.id}">Verwijderen</button>` : ''}
-    </div>
     ${hazelnutRisk(recipe) ? safety(recipe) : ''}
-    <div class="jump-links" role="group" aria-label="In dit recept">
-      ${[['nutrition', 'Porties & voeding'], ['ingredients', 'Ingrediënten'], ['preparation', 'Bereiding']].map(([id, title]) =>
-        button('jump', title, `data-id="${id}"`, 'jump')).join('')}
+    <div class="recipe-toolbar">
+      <button class="button primary" type="button" data-v6="cook-open" data-id="${recipe.id}">${icon('book')} ${cookLabel}</button>
+      <div class="stepper" role="group" aria-label="Porties">
+        ${button('portion', icon('minus'), `data-id="${recipe.id}" data-n="-0.5" aria-label="Halve portie minder"${disabled(n <= .5)}`)}
+        <output aria-live="polite">${formatPortions(n)}</output>
+        ${button('portion', icon('plus'), `data-id="${recipe.id}" data-n="0.5" aria-label="Halve portie meer"${disabled(n >= maxPortions)}`)}
+      </div>
     </div>
-    <section class="panel recipe-portion" id="nutrition" tabindex="-1">
-        <div class="section-head"><h2>Porties & voedingswaarden</h2><div class="stepper" role="group" aria-label="Porties">
-          ${button('portion', icon('minus'), `data-id="${recipe.id}" data-n="-0.5" aria-label="Halve portie minder"${disabled(n <= .5)}`)}
-          <output aria-live="polite">${formatPortions(n)}</output>
-          ${button('portion', icon('plus'), `data-id="${recipe.id}" data-n="0.5" aria-label="Halve portie meer"${disabled(n >= maxPortions)}`)}
-        </div></div>
-        ${portionNutrition(nutrition)}
-        <p class="note">${nutritionNote}${recipe.custom && recipe.nutritionSource === 'estimate' ? ' Berekend met de lokale USDA-bibliotheek.' : ''}</p>
-        ${producePortion(db,recipe,recipeProduce(recipe,n))}
-    </section>
-    ${snackUseCard(recipe, nutrition, n)}
-    <div class="detail-grid">
-      <section class="panel" id="ingredients" tabindex="-1">
-        <div class="section-head"><h2>Ingrediënten</h2><span class="badge">${formatPortions(n)}</span></div>
-        <ul class="ingredient-list">${measurements.map(({ name, amount }) =>
-          `<li><span>${escapeHtml(cap(name))}</span><strong>${escapeHtml(amount || 'Naar smaak')}</strong></li>`).join('')}</ul>
-        ${!hazelnutRisk(recipe) && !recipe.archived ? button('grocery-add', icon('basket') + ' Voeg toe aan boodschappen',
-          `data-id="${recipe.id}" data-n="${n}"${disabled(inList + n > maxPortions)}`, 'primary ingredient-action') : ''}
-        ${inList ? `<p class="note"><a href="#grocery">${formatPortions(inList)} op je boodschappenlijst</a>${inList + n > maxPortions ? ' · maximaal 12 porties per recept' : ''}</p>` : ''}
-        ${plan && !hazelnutRisk(recipe) ? `<div class="button-row head-actions">
-          ${button('save-recipe-pick', recipeVisit.phase === 'pre' ? 'Bewaar als snack vooraf' : 'Bewaar als snack achteraf',
-            `data-id="${plan.id}" data-phase="${recipeVisit.phase}" data-n="${recipe.id}" data-portions="${n}"`)}</div>` : ''}
-      </section>
-      <section class="panel" id="preparation" tabindex="-1">
-        <h2>Bereiding</h2>
-        <ol class="steps">${recipe.steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
+    ${plan && !hazelnutRisk(recipe) ? `<div class="button-row recipe-context-actions">
+      ${button('save-recipe-pick', recipeVisit.phase === 'pre' ? 'Bewaar als snack vooraf' : 'Bewaar als snack achteraf',
+        `data-id="${plan.id}" data-phase="${recipeVisit.phase}" data-n="${recipe.id}" data-portions="${n}"`)}</div>` : ''}
+    ${recipe.custom && !recipe.archived ? `<div class="button-row recipe-edit-actions">
+      <a class="button" href="#recipeedit/${recipe.id}">Bewerken</a>
+      <a class="button" href="#recipecopy/${recipe.id}">Dupliceren</a>
+      <button class="button text-button danger" type="button" data-v6="recipe-archive" data-id="${recipe.id}">Verwijderen</button></div>` : ''}
+    <div class="recipe-tabs" role="tablist" aria-label="In dit recept">
+      ${recipeTabs.map(([id,label]) => `<button type="button" role="tab" id="recipe-tab-${id}" data-recipe-tab="${id}"
+        aria-controls="${id}" aria-selected="${active === id}" tabindex="${active === id ? 0 : -1}">${label}</button>`).join('')}
+    </div>
+    ${recipePanel('nutrition',active,`<div class="panel recipe-portion">
+      <h2>Voedingswaarden</h2>
+      ${portionNutrition(nutrition)}
+      <p class="note">${nutritionNote}${recipe.custom && recipe.nutritionSource === 'estimate' ? ' Berekend met de lokale USDA-bibliotheek.' : ''}</p>
+      ${producePortion(db,recipe,recipeProduce(recipe,n))}
+    </div>${snackUseCard(recipe,nutrition,n)}`)}
+    ${recipePanel('ingredients',active,`<div class="panel">
+      <h2>Ingrediënten</h2>
+      <ul class="ingredient-list">${measurements.map(({ name, amount }) =>
+        `<li><span>${escapeHtml(cap(name))}</span><strong>${escapeHtml(amount || 'Naar smaak')}</strong></li>`).join('')}</ul>
+      ${!hazelnutRisk(recipe) && !recipe.archived ? button('grocery-add',icon('basket') + ' Voeg toe aan boodschappen',
+        `data-id="${recipe.id}" data-n="${n}"${disabled(inList + n > maxPortions)}`, 'primary ingredient-action') : ''}
+      ${inList ? `<p class="note"><a href="#grocery">${formatPortions(inList)} op je boodschappenlijst</a>${inList + n > maxPortions ? ' · maximaal 12 porties per recept' : ''}</p>` : ''}
+      <div class="recipe-allergens">
+        <h3>Allergenen</h3>
         <p class="note">${recipe.allergens.length ? 'Op basis van de ingrediënten: ' + escapeHtml(recipe.allergens.join(', ')) + '. ' : 'Geen allergenen opgegeven. '}${allergenNote}</p>
         ${!hazelnutRisk(recipe) && !recipe.archived ? button(db.allergenReviews[recipe.id] ? 'etiket-wis' : 'etiket-bewaar',
           db.allergenReviews[recipe.id] ? 'Etiketcontrole wissen' : 'Etiketten gecontroleerd', `data-id="${recipe.id}"`, 'text-button') : ''}
         ${recipe.custom ? `<p class="note">${practical(recipe).storage === 'cold' ? 'Koeling nodig. ' : practical(recipe).storage === 'shelf' ? 'Door jou als ongekoeld meeneembaar ingevoerd. ' : 'Koeling onbekend. '}${escapeHtml(practical(recipe).note)}</p>` : ''}
-        <label class="field rating"><span>Jouw beoordeling</span><select id="rating-select">
-          ${options([[0, 'Nog te proberen'], ...[1, 2, 3, 4, 5].map(n => [n, n + (n === 1 ? ' ster' : ' sterren')])], db.ratings[recipe.id] ?? 0)}
-        </select></label>
-      </section>
-    </div>`;
+      </div>
+    </div>`)}
+    ${recipePanel('preparation',active,`<div class="panel">
+      <div class="section-head prep-header"><h2>Bereiding</h2><span class="note">${recipe.steps.length} ${recipe.steps.length === 1 ? 'stap' : 'stappen'}</span></div>
+      <ol class="recipe-steps">${recipe.steps.map(step => `<li>
+        ${step.title ? `<h3>${escapeHtml(step.title)}</h3>` : ''}
+        <p>${escapeHtml(step.text)}</p>
+        ${step.minutes ? `<small class="step-time">${icon('clock')} ${step.minutes} min timer in kookmodus</small>` : ''}
+      </li>`).join('')}</ol>
+      ${recipe.id === 20 ? '<a class="snack-use-source" href="https://www.voedingscentrum.nl/nl/thema/5xveilig/Kip.aspx" target="_blank" rel="noopener">Voedingscentrum · Veilig met kip</a>' : ''}
+      <label class="field rating"><span>Jouw beoordeling</span><select id="rating-select">
+        ${options([[0, 'Nog te proberen'], ...[1, 2, 3, 4, 5].map(n => [n, n + (n === 1 ? ' ster' : ' sterren')])], db.ratings[recipe.id] ?? 0)}
+      </select></label>
+    </div>`)}`;
 }
 
 function grocery() {
@@ -950,7 +983,24 @@ function resetSearch() {
   advancedFilter = {};
 }
 
+main.addEventListener('keydown', event => {
+  const tab = event.target.closest('[data-recipe-tab]');
+  if (!tab || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+  const tabs = [...tab.parentElement.querySelectorAll('[data-recipe-tab]')];
+  const index = tabs.indexOf(tab);
+  const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) :
+    tabs[(index + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length];
+  event.preventDefault();
+  switchRecipeTab(next);
+  next.focus({preventScroll:true});
+});
+
 main.addEventListener('click', async event => {
+  const recipeTab = event.target.closest('[data-recipe-tab]');
+  if (recipeTab) {
+    switchRecipeTab(recipeTab);
+    return;
+  }
   const link = event.target.closest('a[data-recipe-link]');
   const navigate = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
   if (link && navigate) {
@@ -1037,12 +1087,6 @@ main.addEventListener('click', async event => {
     case 'reset-search':
       resetSearch();
       break;
-    case 'jump': {
-      const target = document.getElementById(id);
-      target.scrollIntoView({ block: 'start' });
-      target.focus({ preventScroll: true });
-      return;
-    }
     case 'food-phase':
       foodPhase = id;
       break;

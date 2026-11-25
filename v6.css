@@ -74,7 +74,6 @@
 .recipe-placeholder.choice-image { aspect-ratio: 1; }
 .recipe-placeholder.choice-image > .icon { width: 25px; height: 25px; }
 .recipe-description { margin-top: 9px; color: var(--muted); overflow-wrap: anywhere; }
-.recipe-actions { margin: 13px 0 2px; }
 .safety-alert { margin-top: 10px; }
 .safety-note { margin-top: 12px; }
 .allergen-tag { display: block; width: fit-content; margin-top: 5px; padding: 3px 6px; border-radius: 6px; background: #fff0ce; color: #673b20; font-weight: 650; }

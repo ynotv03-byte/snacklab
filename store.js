@@ -2,12 +2,12 @@ import { emptyGym, validateGym } from './gym-model.js';
 import { emptyVegetables, validateVegetables } from './vegetables.js';
 import { blankState, builtinMap, localDate, parseState, setOwnRecipes, storageKey, validDate } from './core.js';
 import { validateRecipe, validateWork, validateWeek, validateCook, validateFilter, maxPlanPortions,
-  checkWorkOverlap, catalogueFor, isObject, isJPEG, recipeFromOwn, trimText, monday, syncSportWeeks } from './model.js';
+  checkWorkOverlap, catalogueFor, isObject, isJPEG, recipeFromOwn, trimText, monday, syncSportWeeks, expandCookProgress } from './model.js';
 
 export const maxOwnRecipes = 100;
 export const maxBackupBytes = 120 * 1024 * 1024;
 const snapshotFormat = 'SnackLab';
-const storageRevision = 2;
+const storageRevision = 3;
 const validKey = value => /^[\w:-]{1,120}$/.test(value);
 
 export function blankSnapshot(base = blankState()) {
@@ -33,7 +33,7 @@ export function validateSnapshot(input) {
       !Array.isArray(input.workProfiles) || input.workProfiles.length > 24 ||
       !Array.isArray(input.filterProfiles) || input.filterProfiles.length > 40 ||
       !isObject(input.weeks) || !isObject(input.cooking)) throw new Error('Deze back-up is geen ondersteunde SnackLab 6-back-up.');
-  if (![undefined,1,storageRevision].includes(input.storageRevision)) {
+  if (![undefined,1,2,storageRevision].includes(input.storageRevision)) {
     throw new Error('Deze gegevens zijn gemaakt met een nieuwere of onbekende opslagversie van SnackLab.');
   }
   const customRecipes = input.customRecipes.map(validateRecipe);
@@ -54,8 +54,10 @@ export function validateSnapshot(input) {
   unique(filterProfiles, 'id', 'Dubbele filterprofielen in de back-up.');
   const weeks = Object.fromEntries(Object.entries(input.weeks).map(([key, week]) => [key, validateWeek(week, key, catalogue)]));
   const cooking = Object.fromEntries(Object.entries(input.cooking).map(([key, cook]) => {
-    if (String(Number(key)) !== key || !catalogue.has(Number(key))) throw new Error('Een kooksessie verwijst naar een onbekend recept.');
-    return [key, validateCook(cook)];
+    const recipe = catalogue.get(Number(key));
+    if (String(Number(key)) !== key || !recipe) throw new Error('Een kooksessie verwijst naar een onbekend recept.');
+    const session = validateCook(cook);
+    return [key, input.storageRevision === storageRevision ? session : expandCookProgress(session,recipe)];
   }));
   const { weekImports = {}, ...groceryBase } = input.grocery ?? {};
   if (!isObject(weekImports)) throw new Error('Een weekboodschappenlijst is ongeldig.');

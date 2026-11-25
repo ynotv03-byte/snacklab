@@ -84,7 +84,7 @@ export function recipeFromOwn(item, image = '') {
     ...item, ...item.nutrition, custom: true, image, weight: null,
     tags: item.texture ? [item.texture] : [],
     ingredients: item.ingredients.map(ingredient => ({ ...ingredient, amount: ingredient.amount === null ? null : ingredient.amount / item.servings })),
-    steps: item.steps.map(step => step.text), stepTimers: item.steps.map(step => step.minutes)
+    steps: item.steps
   };
 }
 
@@ -507,10 +507,11 @@ export function makeTimer(label, minutes, now = Date.now()) {
   if (!Number.isInteger(minutes) || !bounded(minutes, 1, 240)) invalid('Kies een timer tussen 1 en 240 minuten.');
   return { id: newId(), label: trimText(label, 90) || 'Timer', endAt: now + minutes * 60000, remaining: null };
 }
-export function stepMinutes(recipe, index) {
-  if (recipe.custom) return recipe.stepTimers[index] ?? null;
-  const hints = { 20: { 2: 2 }, 21: { 1: 2 }, 22: { 1: 3 } };
-  return hints[recipe.id]?.[index] ?? null;
+export function expandCookProgress(cook, recipe) {
+  if (recipe.custom || (!cook.complete && cook.step < 0)) return cook;
+  // Resume at the first safe step of the old instruction, including work it assumed was already done.
+  const starts = { 5:[0,1], 19:[0,0,3], 20:[0,2,3], 21:[0,3], 22:[0,1,4] };
+  return { ...cook, step:cook.complete ? recipe.steps.length - 1 : starts[recipe.id]?.[cook.step] ?? 0 };
 }
 
 export const maxPlanPortions = maxPortions * 140;

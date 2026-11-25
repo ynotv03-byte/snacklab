@@ -4,7 +4,7 @@ import { groceryGroups } from './data.js';
 import { ingredientsLibrary } from './ingredients.js';
 import { recipeProduce, canLogSnack } from './vegetables.js';
 import {
-  addDays, emptyWeek, monday, moments, practical, secondsLeft, stepMinutes, timerLabel,
+  addDays, emptyWeek, monday, moments, practical, secondsLeft, timerLabel,
   weekdays, workProfile, workSlots, workoutAfterShift, workSuggestions, nutritionTotal, strategies,
   newRecipe, newWorkProfile, units, allergenOptions, storageOptions, hazelnutOptions, labelCheckText,
   knownRiskText, coldText, filterFlags, workEligible, sportWeekConflict
@@ -354,8 +354,7 @@ export function cookingView(recipe, state, session) {
   const n = session.servings;
   const last = recipe.steps.length - 1;
   const index = Math.min(session.step,last);
-  const minutes = stepMinutes(recipe,index);
-  const stepText = recipe.steps[index] ?? '';
+  const step = recipe.steps[index];
   const checklist = recipe.ingredients.map((ingredient,i) => {
     const view = formatIngredient(ingredient,n);
     return `<li><label class="checkbox cook-check"><input type="checkbox" data-cook-check="${i}"${check(session.checked.includes(i))}><span>${h(cap(view.name))}</span><strong>${h(view.amount || 'Naar smaak')}</strong></label></li>`;
@@ -380,8 +379,8 @@ export function cookingView(recipe, state, session) {
       <div class="section-head"><h2>Ingrediënten</h2>
         ${select('cook-servings','Porties',Array.from({length:maxPortions*2},(_,i)=>[(i+1)/2,formatPortions((i+1)/2)]),n,'data-cook-servings')}
       </div>${portionNutrition(scaleNutrition(recipe,n),true)}<ul class="cook-list">${checklist}</ul>${hazelnutRisk(recipe) ? '' : safety(recipe)}</section>` :
-      `<section class="panel cook-current"><h2>${'Stap ' + (index+1)}</h2><p class="cook-step">${h(stepText)}</p>
-      ${minutes ? `<p class="note">Timer voor een kijkmoment. Controleer zelf of de ingrediënten gaar zijn.</p>${act('cook-start-step','Start timer · '+minutes+' min',`data-minutes="${minutes}"`)}` : ''}
+      `<section class="panel cook-current"><h2>${h(step.title || 'Stap ' + (index+1))}</h2><p class="cook-step">${h(step.text)}</p>
+      ${step.minutes ? `<p class="note">Gebruik de timer als kijkmoment en volg de instructie bij deze stap.</p>${act('cook-start-step','Start timer · '+step.minutes+' min',`data-minutes="${step.minutes}"`)}` : ''}
       </section>`}
     <details class="panel form-section cook-timers" id="cook-timers" data-keep-open>
       <summary>Timers${session.timers.length ? ' (' + session.timers.length + ')' : ''}</summary>

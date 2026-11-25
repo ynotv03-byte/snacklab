@@ -224,8 +224,42 @@ main.shell { padding-block: 29px calc(116px + env(safe-area-inset-bottom)); }
 .detail-tags, .detail-tags > span { display: flex; gap: 7px; align-items: center; }
 .detail-tags { flex-wrap: wrap; padding-right: 48px; color: var(--muted); font-size: .9rem; }
 .badge { display: inline-flex; padding: .28rem .58rem; border-radius: 10px; background: var(--leaf); color: var(--deep); font-size: .8rem; font-weight: 700; }
-.jump-links { display: flex; flex-wrap: wrap; gap: 7px; margin-block: 12px; }
-.jump-links .jump { border-color: var(--line); }
+.recipe-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-block: 10px; }
+.recipe-context-actions, .recipe-edit-actions { margin-bottom: 12px; }
+.recipe-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-block: 13px 9px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--soft);
+}
+.recipe-tabs > button {
+  min-height: 46px;
+  padding: .35rem;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--forest);
+  font-size: .92rem;
+  font-weight: 740;
+}
+.recipe-tabs > button[aria-selected="true"] { border-color: var(--forest); background: var(--forest); color: #fff; }
+.recipe-tabs > button:hover { border-color: var(--forest); }
+.recipe-panel { min-width: 0; border-radius: var(--radius); }
+.recipe-allergens { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+.recipe-allergens .note { margin-top: .35rem; }
+.prep-header { align-items: baseline; margin-bottom: .6rem; }
+.prep-header .note { margin: 0; white-space: nowrap; }
+.recipe-steps { margin: 0; padding-inline-start: 1.55rem; }
+.recipe-steps li { padding: .7rem 0 .8rem .25rem; border-block-end: 1px solid var(--line); }
+.recipe-steps li::marker { color: var(--forest); font-weight: 800; }
+.recipe-steps li:last-child { border-block-end: 0; }
+.recipe-steps h3 { margin-bottom: .28rem; }
+.recipe-steps p { max-width: 72ch; }
+.step-time { display: inline-flex; align-items: center; gap: .35rem; margin-top: .45rem; padding: .2rem .55rem; border-radius: 8px; background: var(--soft); color: var(--forest); font-weight: 700; }
 .snack-use {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(10rem, 26%);
@@ -501,11 +535,10 @@ nav {
   .chip { padding-inline: .67rem; }
   .detail-grid, .shop-grid { grid-template-columns: minmax(0, 1fr); }
   .detail-top { grid-template-columns: minmax(0, 1fr); border-radius: 17px; }
-  .detail-top img { max-height: 210px; aspect-ratio: 1.64; }
+  .detail-top > :is(img, .recipe-placeholder) { width: 100%; height: clamp(115px, 36vw, 178px); aspect-ratio: auto; }
   .detail-copy { padding: 13px 14px 17px; }
   .detail-copy h1 { font-size: clamp(1.91rem, 7.9vw, 2.7rem); }
-  .jump-links { gap: 5px; margin-block: 8px; }
-  .jump-links .jump { padding-inline: .55rem; font-size: .82rem; }
+  .recipe-tabs > button { font-size: .84rem; }
   .ingredient-action { width: 100%; }
   .training-summary { grid-template-columns: minmax(0, 1fr); }
   .training-summary a { grid-column: 1; grid-row: auto; justify-self: start; margin: 3px 0 0; }
@@ -550,8 +583,6 @@ nav {
 .veg-today progress::-webkit-progress-value, .veg-portion progress::-webkit-progress-value, .veg-log-meter progress::-webkit-progress-value { background: var(--forest); }
 .veg-today progress::-moz-progress-bar, .veg-portion progress::-moz-progress-bar, .veg-log-meter progress::-moz-progress-bar { background: var(--forest); }
 .recipe-portion { margin-bottom: 13px; }
-.recipe-portion .section-head { flex-wrap: wrap; gap: .55rem; margin-bottom: .65rem; }
-.recipe-portion .stepper { margin-inline-start: auto; }
 .nutrition-compact { grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 5px; }
 .nutrition-compact > div { padding: .35rem .2rem; border-radius: 8px; }
 .nutrition-compact strong { font-size: .9rem; }
@@ -600,7 +631,6 @@ nav {
   .veg-today { grid-template-columns: minmax(0, 1fr); gap: .65rem; }
   .veg-today .button { justify-self: start; }
   .veg-entry > div { flex-basis: 100%; }
-  .recipe-portion .stepper { margin-inline-start: 0; }
 }
 @media (max-width: 480px) {
   :is(.recipe-portion .nutrition, .nutrition-compact) { grid-template-columns: repeat(6,minmax(0,1fr)); }

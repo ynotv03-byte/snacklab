@@ -45,7 +45,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Meng yoghurt, knoflook en peper. Serveer als dip."
+      {"title": "Maak de wortels klaar", "text": "Spoel de snackwortels af en dep ze droog. Halveer dikke wortels in de lengte als je ze makkelijker wilt dippen."},
+      {"title": "Roer de dip", "text": "Pers of rasp de knoflook fijn. Roer die door de Griekse yoghurt, breng op smaak met peper en serveer de dip naast de wortels."}
     ],
     "image": "./recipe-01.webp"
   },
@@ -95,7 +96,8 @@ export const recipes = [
       "mosterd"
     ],
     "steps": [
-      "Meng yoghurt, mosterd en honing."
+      {"title": "Roer de saus glad", "text": "Roer de mosterd en honing eerst door een lepel Griekse yoghurt. Meng de rest van de yoghurt erdoor en proef of de zoete en scherpe smaken in balans zijn."},
+      {"title": "Serveer met de wortels", "text": "Spoel de wortels af, dep ze droog en leg ze naast de dip. Snijd dikke wortels eventueel in de lengte."}
     ],
     "image": "./recipe-02.webp"
   },
@@ -132,7 +134,7 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Gebruik de roomkaas als dip."
+      {"title": "Zet de dip klaar", "text": "Spoel de snackwortels af en dep ze droog. Schep de kruidenroomkaas in een klein bakje en roer hem even los, zodat je er makkelijk in kunt dippen."}
     ],
     "image": "./recipe-03.webp"
   },
@@ -169,7 +171,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Snijd plakjes en besmeer."
+      {"title": "Snijd de komkommer", "text": "Was de komkommer en snijd hem in plakken van ongeveer 1 cm. Dep de snijkanten droog zodat de roomkaas beter blijft zitten."},
+      {"title": "Besmeer de plakjes", "text": "Verdeel de kruidenroomkaas met een theelepel over de plakken. Serveer meteen of zet de hapjes afgedekt in de koelkast."}
     ],
     "image": "./recipe-04.webp"
   },
@@ -212,7 +215,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Besmeer plakjes en beleg met kip."
+      {"title": "Maak stevige plakjes", "text": "Was de komkommer, snijd hem in plakken van ongeveer 1 cm en dep ze droog."},
+      {"title": "Beleg de komkommer", "text": "Besmeer elk plakje dun met kruidenroomkaas. Vouw het kipfiletbeleg op maat en leg het erop. Bewaar de hapjes afgedekt in de koelkast als je ze later eet."}
     ],
     "image": "./recipe-05.webp"
   },
@@ -252,8 +256,8 @@ export const recipes = [
     ],
     "allergens": [],
     "steps": [
-      "Snijd de banaan in plakjes.",
-      "Verdeel de honing en kaneel over de plakjes."
+      {"title": "Snijd de banaan", "text": "Pel de banaan en snijd hem in plakken van ongeveer een halve centimeter. Leg ze naast elkaar op een bord."},
+      {"title": "Verdeel de topping", "text": "Druppel de honing in dunne lijntjes over de plakjes. Strooi de kaneel er gelijkmatig over en serveer meteen."}
     ],
     "image": "./recipe-06.webp"
   },
@@ -296,7 +300,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Meng kwark en whey, voeg mango toe."
+      {"title": "Maak de vanillekwark", "text": "Roer de vanille-whey eerst door een paar lepels kwark tot een glad mengsel. Roer daarna de overige kwark erdoor."},
+      {"title": "Voeg de mango toe", "text": "Snijd de mango in hapklare blokjes en schep ze losjes door de kwark. Gebruik je diepvriesmango, volg dan de bereidingsinstructies op de verpakking en laat eventueel vocht uitlekken."}
     ],
     "image": "./recipe-07.webp"
   },
@@ -339,7 +344,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Meng kwark en whey als dip."
+      {"title": "Was en droog de aardbeien", "text": "Spoel de aardbeien af vóór je de kroontjes verwijdert. Dep ze droog en halveer de grote exemplaren."},
+      {"title": "Maak de chocoladedip", "text": "Roer de chocolade-whey eerst door een lepel kwark. Roer de rest van de kwark er in twee delen bij tot je geen droge plekjes meer ziet. Serveer de aardbeien naast de dip."}
     ],
     "image": "./recipe-08.webp"
   },
@@ -381,7 +387,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Blend alles."
+      {"title": "Vul de blender", "text": "Schenk eerst de melk in de blenderkan. Breek de banaan in stukken en voeg die samen met de chocolade-whey toe."},
+      {"title": "Mix tot de shake glad is", "text": "Sluit de blender af en mix ongeveer 30 seconden. Zet de blender stil en kijk of er nog stukjes of poeder aan de wand zitten. Schraap die zo nodig los en mix kort opnieuw."}
     ],
     "image": "./recipe-09.webp"
   },
@@ -436,7 +443,9 @@ export const recipes = [
       "tarwe (gluten)"
     ],
     "steps": [
-      "Besmeer, beleg en rol op."
+      {"title": "Maak het beleg klaar", "text": "Was de komkommer en sla en dep ze droog. Snijd de komkommer in dunne reepjes, zodat de wrap straks makkelijk dichtrolt."},
+      {"title": "Beleg de wrap", "text": "Besmeer de wrap met kruidenroomkaas. Leg de kipfilet, sla en komkommer in een strook net onder het midden. Houd aan de zijkanten wat ruimte vrij."},
+      {"title": "Rol de wrap dicht", "text": "Vouw de zijkanten naar binnen en rol vanaf de onderkant om de vulling. Leg de wrap met de naad omlaag en snijd hem eventueel doormidden."}
     ],
     "image": "./recipe-10.webp"
   },
@@ -484,7 +493,9 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Blend en koel."
+      {"title": "Maak de bananenbasis", "text": "Prak de banaan fijn in een kom. Roer er een paar lepels kwark door tot de grootste stukjes weg zijn."},
+      {"title": "Meng de pudding", "text": "Voeg de chocolade-whey en cacao beetje bij beetje toe. Roer de rest van de kwark erdoor tot het mengsel glad is. Gebruik een staafmixer als je de pudding helemaal glad wilt hebben."},
+      {"title": "Serveer of koel kort", "text": "Schep de pudding in een schaaltje. Je kunt hem meteen eten of afgedekt in de koelkast zetten als je hem kouder en wat steviger wilt."}
     ],
     "image": "./recipe-11.webp"
   },
@@ -526,7 +537,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Blend alles."
+      {"title": "Vul de blender", "text": "Doe eerst de melk in de blender, daarna de vanille-whey en mangoblokjes. Gebruik je diepvriesmango, volg dan de bereidingsinstructies op de verpakking."},
+      {"title": "Mix en schenk", "text": "Mix met het deksel erop tot je geen stukjes mango meer ziet. Zet de blender uit voordat je de dikte controleert. Mix zo nodig nog eens kort en schenk de shake in een glas."}
     ],
     "image": "./recipe-12.webp"
   },
@@ -569,7 +581,10 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Prak banaan, meng met ei en whey, bak kleine pancakes."
+      {"title": "Prak de banaan en meng het beslag", "text": "Prak de banaan zo fijn mogelijk. Klop de eieren erdoor en roer de chocolade-whey in twee delen door het beslag om klontjes te voorkomen."},
+      {"title": "Maak kleine hoopjes beslag", "text": "Verwarm een antiaanbakpan op middellaag vuur. Schep kleine hoopjes beslag in de pan en laat ruimte ertussen. Kleine pannenkoekjes zijn makkelijker te keren."},
+      {"title": "Keer zodra de rand stevig is", "text": "Kijk na ongeveer 2 minuten. Keer de pannenkoekjes zodra de rand steviger is en de onderkant loslaat. Wacht zo nodig wat langer op lager vuur.", "minutes": 2},
+      {"title": "Bak de andere kant gaar", "text": "Bak de tweede kant nog ongeveer 1–2 minuten. Open het dikste pannenkoekje om te controleren of het midden stevig is en geen vloeibaar beslag meer bevat. Bak extra porties in rondes."}
     ],
     "image": "./recipe-13.webp"
   },
@@ -612,7 +627,9 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Blend tot mousse."
+      {"title": "Houd wat frambozen apart", "text": "Spoel verse frambozen voorzichtig af en laat ze uitlekken. Volg bij diepvriesframbozen de aanwijzingen op de verpakking. Houd eventueel een paar bessen apart voor bovenop."},
+      {"title": "Maak de mousse", "text": "Roer de chocolade-whey eerst door de kwark. Voeg de frambozen toe en mix met een staafmixer tot een dikke mousse. Stop zodra alles goed gemengd is."},
+      {"title": "Schep in een schaaltje", "text": "Schep de mousse in een schaaltje en voeg de overgebleven frambozen toe. Laat hem afgedekt in de koelkast staan als je hem later eet."}
     ],
     "image": "./recipe-14.webp"
   },
@@ -661,7 +678,8 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Meng dip en serveer met appel."
+      {"title": "Roer de vanilledip", "text": "Roer eerst de whey door een paar lepels kwark. Voeg de rest van de kwark en de kaneel toe en roer tot de dip glad is."},
+      {"title": "Snijd de appel", "text": "Was de appel, verwijder het klokhuis en snijd de appel vlak voor het eten in partjes. Serveer de partjes naast de dip."}
     ],
     "image": "./recipe-15.webp"
   },
@@ -729,7 +747,9 @@ export const recipes = [
       "tarwe (gluten)"
     ],
     "steps": [
-      "Meng saus, beleg en rol op."
+      {"title": "Meng de honing-mosterdsaus", "text": "Roer de yoghurt, mosterd en honing tot een gladde saus. Was en droog de sla en komkommer, en snijd de komkommer in dunne reepjes."},
+      {"title": "Verdeel de vulling", "text": "Smeer een dun laagje saus op de wrap. Leg kipfilet, sla en komkommer in het midden. Houd de randen vrij zodat de saus er bij het rollen niet uitloopt."},
+      {"title": "Rol strak op", "text": "Vouw beide zijkanten naar binnen. Rol de wrap vanaf de onderkant stevig op en leg hem met de naad omlaag."}
     ],
     "image": "./recipe-16.webp"
   },
@@ -742,7 +762,7 @@ export const recipes = [
     "fat": 19,
     "fiber": 7,
     "weight": 250,
-    "minutes": 13,
+    "minutes": 15,
     "taste": "hartig",
     "tags": [
       "romig"
@@ -785,7 +805,9 @@ export const recipes = [
       "tarwe (gluten)"
     ],
     "steps": [
-      "Prak avocado en beleg met ei en spinazie."
+      {"title": "Kook de eieren", "text": "Leg de eieren in een pan met water en breng het water aan de kook. Kook ze 9 minuten zodra het water kookt. Laat ze schrikken onder koud water en pel ze.", "minutes": 9},
+      {"title": "Maak de avocado en spinazie klaar", "text": "Was de spinazie en dep hem goed droog. Prak de avocado met een vork en breng op smaak met peper."},
+      {"title": "Vul en rol de wrap", "text": "Besmeer de wrap met avocado. Snijd de eieren in plakjes en leg ze met de spinazie in het midden. Vouw de zijkanten naar binnen en rol vanaf de onderkant op."}
     ],
     "image": "./recipe-17.webp"
   },
@@ -834,7 +856,9 @@ export const recipes = [
       "tarwe (gluten)"
     ],
     "steps": [
-      "Meng kwark en whey, beleg en rol op."
+      {"title": "Maak de chocoladelaag", "text": "Roer de chocolade-whey geleidelijk door de kwark. Smeer het mengsel dun op de wrap en laat een rand vrij."},
+      {"title": "Leg de banaan erop", "text": "Snijd de banaan in dunne plakken of in lange repen. Leg die in een strook net onder het midden van de wrap."},
+      {"title": "Rol en snijd", "text": "Vouw de zijkanten over de banaan en rol de wrap stevig op. Leg de naad onderop en snijd de wrap eventueel doormidden."}
     ],
     "image": "./recipe-18.webp"
   },
@@ -884,7 +908,9 @@ export const recipes = [
       "tarwe (gluten)"
     ],
     "steps": [
-      "Meng roomkaas en whey, voeg aardbeien toe."
+      {"title": "Maak de vulling", "text": "Roer de roomkaas los met een vork. Meng de vanille-whey er beetje bij beetje door tot een gladde, smeerbare vulling."},
+      {"title": "Bereid de aardbeien voor", "text": "Was en droog de aardbeien, verwijder de kroontjes en snijd de vruchten in dunne plakjes."},
+      {"title": "Beleg en rol op", "text": "Besmeer de wrap dun met de vulling en leg de aardbeien in het midden. Vouw de zijkanten naar binnen, rol op en leg de naad onderop."}
     ],
     "image": "./recipe-19.webp"
   },
@@ -897,7 +923,7 @@ export const recipes = [
     "fat": 12,
     "fiber": 1,
     "weight": 280,
-    "minutes": 13,
+    "minutes": 15,
     "taste": "hartig",
     "tags": [
       "krokant",
@@ -942,9 +968,10 @@ export const recipes = [
       "mosterd"
     ],
     "steps": [
-      "Snijd de komkommer in dikke plakken.",
-      "Prak de gekookte eieren en meng ze met de yoghurt, mosterd en eventueel peper.",
-      "Verdeel de eiersalade over de plakken komkommer."
+      {"title": "Kook de eieren hard", "text": "Breng de eieren in een pan met water aan de kook en kook ze vanaf dat moment 9 minuten. Spoel ze af met koud water en pel ze. Met al hardgekookte eieren kun je meteen door naar de volgende stap.", "minutes": 9},
+      {"title": "Maak de komkommer klaar", "text": "Was de komkommer en snijd hem in stevige plakken van ongeveer 1 cm. Dep ze droog zodat de salade beter blijft zitten."},
+      {"title": "Meng de eiersalade", "text": "Prak de eieren grof met een vork. Roer de yoghurt en mosterd erdoor en voeg desgewenst peper toe. Laat wat grove stukjes ei in de salade voor structuur."},
+      {"title": "Beleg de komkommer", "text": "Schep een kleine lepel eiersalade op elk plakje. Serveer de hapjes direct of bewaar ze afgedekt in de koelkast."}
     ],
     "image": "./recipe-20.webp"
   },
@@ -957,7 +984,7 @@ export const recipes = [
     "fat": 10,
     "fiber": 5,
     "weight": 280,
-    "minutes": 10,
+    "minutes": 15,
     "taste": "hartig",
     "tags": [
       "warm",
@@ -1013,9 +1040,11 @@ export const recipes = [
       "tarwe (gluten)"
     ],
     "steps": [
-      "Snijd de kipfilet in reepjes en bak de kip volledig gaar.",
-      "Roer de yoghurt, mosterd en honing door elkaar. Snijd de komkommer en ijsbergsla.",
-      "Beleg de wrap met kip, komkommer, sla en saus. Vouw dicht en rooster kort in een droge koekenpan."
+      {"title": "Maak de groenten klaar", "text": "Was en droog de komkommer en sla. Snijd de komkommer in dunne reepjes en de sla in fijne stroken. Zet de groenten apart van de rauwe kip."},
+      {"title": "Bak de kip door en door gaar", "text": "Snijd de kip in gelijkmatige reepjes op een aparte plank. Bak in een hete antiaanbakpan op middelhoog vuur en keer de reepjes. Verhit de kip door en door. Meet je met een schone thermometer, houd in het dikste stuk dan minstens 30 seconden 75 °C aan. Leg de gare kip op een schoon bord en was je handen en het gebruikte keukengerei."},
+      {"title": "Roer de honing-mosterdsaus", "text": "Roer de yoghurt, mosterd en honing met schoon keukengerei tot een gladde saus. Zet de eerder gesneden komkommer en sla klaar voor de volgende stap."},
+      {"title": "Vul en vouw de wrap", "text": "Leg de gare kip, komkommer en sla in het midden van de wrap. Lepel de saus over de vulling. Vouw de zijkanten naar binnen en rol de wrap dicht."},
+      {"title": "Rooster de buitenkant", "text": "Leg de wrap met de naad omlaag in een schone droge koekenpan. Rooster op middelhoog vuur ongeveer 1–2 minuten per kant, tot de buitenkant krokant is. Keer met een brede spatel.", "minutes": 2}
     ],
     "image": "./recipe-21.webp"
   },
@@ -1078,8 +1107,10 @@ export const recipes = [
       "tarwe (gluten)"
     ],
     "steps": [
-      "Bak roerei. Prak de avocado en verdeel die met het roerei, de spinazie, kaas en peper over de wrap.",
-      "Vouw de wrap dubbel en rooster beide kanten in een droge koekenpan tot de wrap krokant is."
+      {"title": "Bereid de vulling voor", "text": "Was en droog de spinazie en prak de avocado. Klop de eieren los met een vork en voeg naar smaak peper toe."},
+      {"title": "Bak het roerei", "text": "Verwarm een antiaanbakpan op matig vuur. Schenk het ei erin en schuif het met een spatel rustig van de randen naar het midden. Haal de pan van het vuur zodra er geen vloeibaar ei meer in zit."},
+      {"title": "Vul één helft van de wrap", "text": "Bestrijk één helft met avocado. Verdeel het roerei, de spinazie en geraspte kaas erover. Houd de rand vrij en vouw de andere helft eroverheen."},
+      {"title": "Rooster tot hij krokant is", "text": "Rooster de gevouwen wrap in een droge koekenpan op middellaag vuur. Kijk na 2 minuten of de onderkant bruin wordt. Keer voorzichtig en bak verder tot ook de andere kant krokant is en de kaas gesmolten is.", "minutes": 2}
     ],
     "image": "./recipe-22.webp"
   },
@@ -1135,9 +1166,11 @@ export const recipes = [
       "melk"
     ],
     "steps": [
-      "Prak de banaan en meng met de eieren en chocolade-whey.",
-      "Bak kleine pannenkoekjes en laat beide kanten gaar worden.",
-      "Serveer met de kwark en frambozen."
+      {"title": "Maak een glad beslag", "text": "Prak de banaan fijn. Klop de eieren erdoor en roer de chocolade-whey beetje bij beetje door het mengsel. Zet de kwark en frambozen klaar voor het serveren."},
+      {"title": "Bak op middellaag vuur", "text": "Verwarm een antiaanbakpan en schep kleine hoopjes beslag in de pan. Laat ruimte tussen de pannenkoekjes zodat je ze makkelijk kunt keren."},
+      {"title": "Keer als de rand opstijft", "text": "Kijk na ongeveer 2 minuten. Keer zodra de onderkant loslaat en de rand stevig is. Als het beslag nog uitloopt wanneer je de spatel eronder steekt, wacht dan nog even.", "minutes": 2},
+      {"title": "Controleer het midden", "text": "Bak de andere kant nog ongeveer 1–2 minuten. Controleer of het dikste pannenkoekje helemaal gestold is. Bak de rest in rondes als het beslag niet in één pan past."},
+      {"title": "Serveer met kwark en frambozen", "text": "Verdeel de pannenkoekjes over de borden. Schep de kwark erop en verdeel de frambozen erover. Volg bij diepvriesframbozen de bereidingsinstructies op de verpakking."}
     ],
     "image": "./recipe-23.webp"
   }

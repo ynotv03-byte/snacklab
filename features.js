@@ -531,9 +531,9 @@ export function attachFeatures(main, api) {
           shownTimers = new Set();
           break;
         case 'cook-start-step':
-          if (await mutateCook(cook => {
+          if (await mutateCook((cook,recipe) => {
             if (cook.timers.length >= 8) fail('Verwijder eerst een timer. Je kunt maximaal acht timers bewaren.');
-            cook.timers.push(makeTimer('Stap ' + (cook.step + 1), Number(control.dataset.minutes)));
+            cook.timers.push(makeTimer(recipe.steps[cook.step]?.title || 'Stap ' + (cook.step + 1), Number(control.dataset.minutes)));
           })) {
             openTimers();
             announce('Timer gestart.');
