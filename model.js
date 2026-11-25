@@ -32,7 +32,7 @@ export function newRecipe() {
     name: '', description: '', servings: 1, minutes: 10, taste: 'hartig', texture: '',
     ingredients: [{ product: '', amount: null, unit: 'g', group: 'Overig' }],
     steps: [{ text: '', minutes: null }], nutrition: Object.fromEntries(nutrientKeys.map(key => [key, null])),
-    nutritionSource: 'manual', allergens: [], labelsReviewed: false, hazelnut: 'unknown',
+    nutritionSource: 'manual', vegetableGrams: null, allergens: [], labelsReviewed: false, hazelnut: 'unknown',
     storage: 'unknown', keep: '', portable: false, heat: false, moments: [], photo: null, photoVersion: '', archived: false
   };
 }
@@ -58,6 +58,8 @@ export function validateRecipe(input) {
   });
   if (!isObject(input.nutrition) || !nutrientKeys.every(key =>
     input.nutrition[key] === null || bounded(input.nutrition[key], 0, key === 'kcal' ? 12000 : 1500))) invalid('Controleer de voedingswaarden. Laat onbekende waarden leeg.');
+  const vegetableGrams = input.vegetableGrams ?? null;
+  if (vegetableGrams !== null && !bounded(vegetableGrams, 0, 10000)) invalid('Vul tussen 0 en 10.000 g groente per portie in of laat dit leeg.');
   if (!Array.isArray(input.allergens) || !input.allergens.every(allergen => allergenOptions.includes(allergen)) ||
     !Array.isArray(input.moments) || !input.moments.every(moment => oneOf(moment, moments)) ||
     !oneOf(input.hazelnut, hazelnutOptions) || !oneOf(input.storage, storageOptions)) invalid('Controleer allergenen en bewaargegevens.');
@@ -65,7 +67,7 @@ export function validateRecipe(input) {
   return {
     id: input.id, name, description: trimText(input.description, 340), servings, minutes, taste, texture, ingredients, steps,
     nutrition: Object.fromEntries(nutrientKeys.map(key => [key, input.nutrition[key]])),
-    nutritionSource: input.nutritionSource === 'estimate' ? 'estimate' : 'manual',
+    nutritionSource: input.nutritionSource === 'estimate' ? 'estimate' : 'manual', vegetableGrams,
     allergens: [...new Set(input.allergens)], labelsReviewed: input.labelsReviewed === true, hazelnut: input.hazelnut,
     storage: input.storage, keep: trimText(input.keep, 440), portable: input.portable === true,
     heat: input.heat === true, moments: [...new Set(input.moments)],

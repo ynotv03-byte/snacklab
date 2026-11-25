@@ -1,7 +1,8 @@
-import { byId, formatIngredient, formatPortions, metric, nutrientKeys, nutrientLabels,
+import { byId, formatIngredient, formatPortions, metric, nutrientKeys, nutrientLabels, scaleNutrition,
   maxPortions, localDate, sports, intensities, textures, hazelnutRisk } from './core.js';
 import { groceryGroups } from './data.js';
 import { ingredientsLibrary } from './ingredients.js';
+import { recipeVegetables } from './vegetables.js';
 import {
   addDays, dailyEntries, emptyWeek, monday, moments, practical, secondsLeft, stepMinutes, timerLabel,
   weekdays, workProfile, workSlots, workoutAfterShift, workSuggestions, nutritionTotal, strategies,
@@ -37,6 +38,12 @@ const select = (name, label, choices, value, attrs = '') => field(label, `<selec
   ${choices.map(([key, caption]) => `<option value="${h(key)}"${selected(value === key)}>${h(caption)}</option>`).join('')}</select>`);
 const details = (title, body, open = false) => `<details class="panel form-section"${open ? ' open' : ''}><summary>${h(title)}</summary><div class="section-body">${body}</div></details>`;
 const smallRecipeLink = (recipe, count) => `<a href="#recipe/${recipe.id}" data-recipe-link${count ? ` data-portions="${count}"` : ''}>${h(recipe.name)}</a>`;
+
+export function portionNutrition(nutrition, compact = false) {
+  return `<div class="nutrition${compact ? ' nutrition-compact' : ''}" role="group" aria-label="Voedingswaarden voor deze porties">
+    ${nutrientKeys.map(key => `<div><strong>${metric(nutrition[key],key === 'kcal' ? '' : 'g')}</strong><small>${nutrientLabels[key]}</small></div>`).join('')}
+  </div>`;
+}
 
 export function safety(recipe) {
   return hazelnutRisk(recipe) ? `<p class="notice safety-alert">${knownRiskText}</p>` :
@@ -175,6 +182,8 @@ export function ownEditor(state, id, copy = false) {
     <section class="panel"><h2>Bereiding</h2><div data-rows="steps">${draft.steps.map(stepRow).join('')}</div>${act('add-step','Stap toevoegen')}</section>
     ${details('Voedingswaarden per portie', `<p class="note">Laat onbekende waarden leeg. Je kunt een schatting maken met ingrediënten uit de lokale USDA-bibliotheek en waarden daarna zelf corrigeren.</p>
       <div class="fields">${nutrientKeys.map(key => num(key,cap(nutrientLabels[key]) + (key === 'kcal' ? '' : ' (g)'),draft.nutrition[key],0,key === 'kcal' ? 12000 : 1500,'any')).join('')}</div>
+      ${num('vegetableGrams','Groente per portie (g)',draft.vegetableGrams,0,10000,'any')}
+      <p class="note">Laat leeg voor een automatische schatting. Vul bij onbekende of gemengde ingrediënten zelf het eetbare groentegewicht in. Fruit telt apart.</p>
       <input type="hidden" name="nutritionSource" value="${h(draft.nutritionSource)}">${act('estimate','Schat uit ingrediënten')}
       <p class="note" data-estimate role="status"></p>`)}
     ${details('Allergenen en bewaren', `<fieldset><legend>Opgegeven allergenen</legend><div class="chip-checks">${allergenOptions.map(key => toggle('allergens',cap(key),draft.allergens.includes(key),key)).join('')}</div></fieldset>
@@ -287,10 +296,20 @@ export function weekEditor(state, key, id) {
       ${field('Tijd',input('time','time',old?.time ?? '15:30','required'))}</div>
       ${select('recipeId','Recept',[['','Nog te kiezen'],...recipes.map(recipe => [recipe.id,recipe.name])],old?.recipeId ?? '')}
       ${num('portions','Porties',old?.portions ?? 1,.5,maxPortions,.5,true)}
+      <div data-week-portion-preview>${weekPortionPreview(old?.recipeId,old?.portions ?? 1)}</div>
       ${toggle('pinned','Vastzetten voor deze week',old?.pinned ?? true)}
       ${status}<div class="button-row">${submit('Snackmoment opslaan')}
       ${old ? act('week-remove','Verwijder moment',`data-key="${key}" data-id="${h(id)}"`,'text-button danger') : ''}</div>
     </form>`;
+}
+
+export function weekPortionPreview(id, n) {
+  const recipe = id !== '' && byId.get(Number(id));
+  if (!recipe || !Number.isFinite(n) || n < .5 || n > maxPortions || !Number.isInteger(n * 2)) return '';
+  const veg = recipeVegetables(recipe,n);
+  return portionNutrition(scaleNutrition(recipe,n),true) + `<p class="note">${
+    veg.unknown ? 'Een deel van het groentegewicht is onbekend.' :
+      (veg.estimated ? '≈ ' : '') + metric(veg.grams) + ' groente'}</p>`;
 }
 
 const flagsLabels = { favorite:'Favorieten', untried:'Nog te proberen', positive:'Beoordeling 4 of 5 sterren',
@@ -335,6 +354,7 @@ export function filterDialog(state, filter) {
 
 export function cookingView(recipe, state, session) {
   const n = session.servings;
+  const veg = recipeVegetables(recipe,n);
   const last = recipe.steps.length - 1;
   const index = Math.min(session.step,last);
   const minutes = stepMinutes(recipe,index);
@@ -357,11 +377,12 @@ export function cookingView(recipe, state, session) {
       ${select('cook-rating','Jouw beoordeling',[[0,'Geen beoordeling'], ...[1,2,3,4,5].map(i=>[i,i+' '+(i===1?'ster':'sterren')])],state.ratings[recipe.id] ?? 0,'data-cook-rating')}
       ${act('cook-favorite',state.favorites.includes(recipe.id) ? 'Favoriet opgeslagen' : 'Bewaar als favoriet',
         `aria-pressed="${state.favorites.includes(recipe.id)}"`)}
+      ${!veg.unknown && veg.grams > 0 ? `<button type="button" class="button" data-action="veg-eaten" data-id="${recipe.id}">Vandaag gegeten</button>` : ''}
       ${act('cook-reset','Opnieuw koken','', 'text-button')}
     </section>` : index === -1 ? `<section class="panel cook-current">
       <div class="section-head"><h2>Ingrediënten</h2>
         ${select('cook-servings','Porties',Array.from({length:maxPortions*2},(_,i)=>[(i+1)/2,formatPortions((i+1)/2)]),n,'data-cook-servings')}
-      </div><ul class="cook-list">${checklist}</ul>${hazelnutRisk(recipe) ? '' : safety(recipe)}</section>` :
+      </div>${portionNutrition(scaleNutrition(recipe,n),true)}<ul class="cook-list">${checklist}</ul>${hazelnutRisk(recipe) ? '' : safety(recipe)}</section>` :
       `<section class="panel cook-current"><h2>${'Stap ' + (index+1)}</h2><p class="cook-step">${h(stepText)}</p>
       ${minutes ? `<p class="note">Timer voor een kijkmoment. Controleer zelf of de ingrediënten gaar zijn.</p>${act('cook-start-step','Start timer · '+minutes+' min',`data-minutes="${minutes}"`)}` : ''}
       </section>`}

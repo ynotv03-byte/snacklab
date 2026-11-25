@@ -581,3 +581,87 @@ nav {
   .nutrition { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .share-button { padding-inline: .56rem; }
 }
+
+.veg-today {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 14px;
+  background: var(--soft);
+  border-color: #cfdac9;
+}
+.veg-today h2 { margin-bottom: .3rem; }
+.veg-today label, .veg-log-meter label { display: block; margin-bottom: .35rem; }
+.veg-today label strong, .veg-log-meter strong { color: var(--forest); }
+.veg-today progress, .veg-portion progress, .veg-log-meter progress {
+  display: block;
+  width: 100%;
+  height: 10px;
+  border: 0;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--line);
+  accent-color: var(--forest);
+}
+.veg-today progress::-webkit-progress-bar, .veg-portion progress::-webkit-progress-bar, .veg-log-meter progress::-webkit-progress-bar { background: var(--line); }
+.veg-today progress::-webkit-progress-value, .veg-portion progress::-webkit-progress-value, .veg-log-meter progress::-webkit-progress-value { background: var(--forest); }
+.veg-today progress::-moz-progress-bar, .veg-portion progress::-moz-progress-bar, .veg-log-meter progress::-moz-progress-bar { background: var(--forest); }
+.recipe-portion { margin-bottom: 13px; }
+.recipe-portion .section-head { flex-wrap: wrap; gap: .55rem; margin-bottom: .65rem; }
+.recipe-portion .stepper { margin-inline-start: auto; }
+.nutrition-compact { grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 5px; }
+.nutrition-compact > div { padding: .35rem .2rem; border-radius: 8px; }
+.nutrition-compact strong { font-size: .9rem; }
+.nutrition-compact small { font-size: .73rem; }
+.veg-portion {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .65rem 1rem;
+}
+.veg-portion > div:first-child { flex: 1 1 18rem; }
+.veg-portion h3 { margin-bottom: .25rem; }
+.veg-portion progress { margin-top: .45rem; }
+.veg-portion .note { margin-top: .35rem; }
+.veg-profile form, .veg-add form { margin-top: .75rem; }
+.veg-source { display: inline-flex; min-height: 44px; align-items: center; font-size: .85rem; }
+:is(.veg-profile,.veg-add,.veg-entry) .form-message:empty { display: none; }
+.veg-profile .button-row, .veg-add .button-row { margin-top: .7rem; }
+.veg-log-meter, .veg-day-log, .veg-add { max-width: 48rem; margin-bottom: 13px; }
+.veg-log-meter h2 { margin-bottom: .42rem; }
+.veg-log-meter p { margin-top: .55rem; color: var(--muted); }
+.veg-log-links { display: flex; flex-wrap: wrap; gap: 1rem; }
+.veg-log-links a, .veg-shop a { display: inline-flex; align-items: center; min-height: 44px; }
+.veg-date-form { display: flex; align-items: end; flex-wrap: wrap; gap: .4rem; }
+.veg-date-form .field { min-width: 0; }
+.veg-date-form .button { min-height: 46px; }
+.clean-list.veg-entries > li { display: block; padding-block: .6rem; }
+.veg-entry { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; }
+.veg-entry > div { flex: 1 0 14rem; overflow-wrap: anywhere; }
+.veg-entry > div small { display: block; color: var(--muted); }
+.veg-entry select { max-width: 9.4rem; }
+.veg-entry input { width: 7rem; }
+.veg-entry .form-message { flex-basis: 100%; }
+.veg-shop { margin-top: .8rem; padding: .65rem .8rem 0; background: var(--soft); border-radius: 12px; }
+.veg-shop strong { color: var(--forest); }
+.veg-shop p { color: var(--muted); font-size: .9rem; }
+.veg-week-amount { display: block; color: var(--muted); }
+.source-nutrition { margin-bottom: .5rem; }
+.source-preview { margin-top: .55rem; }
+.source-preview .note { margin: .35rem 0 0; }
+.recipe-copy .recipe-vegetables { color: var(--forest); font-weight: 650; margin-top: .25rem; }
+@media (max-width: 560px) {
+  .veg-today { grid-template-columns: minmax(0, 1fr); gap: .65rem; }
+  .veg-today .button { justify-self: start; }
+  .veg-entry > div { flex-basis: 100%; }
+  .recipe-portion .stepper { margin-inline-start: 0; }
+}
+@media (max-width: 480px) {
+  :is(.recipe-portion .nutrition, .nutrition-compact) { grid-template-columns: repeat(6,minmax(0,1fr)); }
+  :is(.recipe-portion .nutrition, .nutrition-compact) > div { grid-column: span 2; }
+  :is(.recipe-portion .nutrition, .nutrition-compact) > div:nth-last-child(-n+2) { grid-column: span 3; }
+}

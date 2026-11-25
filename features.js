@@ -158,7 +158,8 @@ export function attachFeatures(main, api) {
         servings: Number(values.get('servings')), minutes: Number(values.get('minutes')), taste: values.get('taste'), texture: values.get('texture'),
         ingredients: ingredientsFrom(form), steps: stepsFrom(form),
         nutrition: Object.fromEntries(nutrientKeys.map(key => [key, numberOrNull(values.get(key))])),
-        nutritionSource: values.get('nutritionSource'), allergens: values.getAll('allergens'),
+        nutritionSource: values.get('nutritionSource'), vegetableGrams: numberOrNull(values.get('vegetableGrams')),
+        allergens: values.getAll('allergens'),
         labelsReviewed: values.has('labelsReviewed'), hazelnut: values.get('hazelnut'), storage: values.get('storage'),
         keep: values.get('keep'), portable: values.has('portable'), heat: values.has('heat'), moments: values.getAll('moments'),
         photo: image ?? (values.has('removePhoto') ? null : previous?.photo ?? null),
@@ -209,6 +210,7 @@ export function attachFeatures(main, api) {
       const entries = week.entries.filter(item => item.id !== entry.id).concat(entry)
         .sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
       state.weeks[key] = validateWeek({ ...week, entries }, key, catalogue);
+      if (Object.hasOwn(state.grocery.weekImports,key)) syncWeekGroceries(state,key,catalogue);
     }, 'Snackmoment opgeslagen.', form);
     if (saved && form.isConnected) go('#week/' + key);
   }
@@ -252,6 +254,7 @@ export function attachFeatures(main, api) {
           protein: numberOrNull(values.get('protein')), kcal: numberOrNull(values.get('kcal')) });
         const ok = await update((state, catalogue) => {
           state.weeks[key] = generateWeek(state, key, { ...(state.weeks[key] ?? emptyWeek()), prefs }, catalogue);
+          if (Object.hasOwn(state.grocery.weekImports,key)) syncWeekGroceries(state,key,catalogue);
         }, 'Weekplanning bijgewerkt.', form);
         if (ok && form.isConnected) redraw();
       } else if (feature === 'timer') {
@@ -474,12 +477,13 @@ export function attachFeatures(main, api) {
           break;
         }
         case 'week-remove':
-          if (await update(state => {
+          if (await update((state,catalogue) => {
             const week = state.weeks[key];
             const entry = week?.entries.find(item => item.id === id);
             if (!entry) return false;
             week.entries = week.entries.filter(item => item.id !== id);
             if (entry.kind !== 'manual' && !week.removed.includes(id)) week.removed.push(id);
+            if (Object.hasOwn(state.grocery.weekImports,key)) syncWeekGroceries(state,key,catalogue);
           }, 'Snackmoment verwijderd.')) go('#week/' + key);
           break;
         case 'cook-open': {

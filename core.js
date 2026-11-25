@@ -194,8 +194,7 @@ export function groceryRows(list, catalogue = byId) {
   const rows = [...result.values()].map(row => ({ ...row, quantity: row.amount, ...formatIngredient(row) }));
   for (const item of list.manual) rows.push({ ...item, key: 'manual:' + item.id, amount: '', manualId: item.id });
   return rows.map(row => ({ ...row, checked: list.checked[row.key] === true }))
-    .sort((a, b) => groceryGroups.indexOf(a.group) - groceryGroups.indexOf(b.group) ||
-      Number(a.checked) - Number(b.checked) || a.name.localeCompare(b.name, 'nl'));
+    .sort((a, b) => groceryGroups.indexOf(a.group) - groceryGroups.indexOf(b.group) || a.name.localeCompare(b.name, 'nl'));
 }
 
 export function reconcileChecks(list, previous, catalogue = byId) {

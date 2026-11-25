@@ -1,4 +1,5 @@
 import { emptyGym, validateGym } from './gym-model.js';
+import { emptyVegetables, validateVegetables } from './vegetables.js';
 import { blankState, builtinMap, parseState, setOwnRecipes, storageKey, validDate } from './core.js';
 import { validateRecipe, validateWork, validateWeek, validateCook, validateFilter, maxPlanPortions,
   checkWorkOverlap, catalogueFor, isObject, isJPEG, recipeFromOwn, trimText, monday } from './model.js';
@@ -11,7 +12,7 @@ const validKey = value => /^[\w:-]{1,120}$/.test(value);
 export function blankSnapshot(base = blankState()) {
   return {
     ...base, schemaVersion: 6, customRecipes: [], nextRecipeId: 1000,
-    workProfiles: [], weeks: {}, cooking: {}, filterProfiles: [], gym: emptyGym(),
+    workProfiles: [], weeks: {}, cooking: {}, filterProfiles: [], gym: emptyGym(), vegetables: emptyVegetables(),
     grocery: { ...base.grocery, weekImports: {} }
   };
 }
@@ -56,13 +57,15 @@ export function validateSnapshot(input) {
   const floor = Math.max(999, ...customRecipes.map(item => item.id)) + 1;
   if (!Number.isSafeInteger(input.nextRecipeId) || input.nextRecipeId < floor || input.nextRecipeId >= Number.MAX_SAFE_INTEGER) throw new Error('Receptnummerreeks is ongeldig.');
   const {
-    customRecipes: _recipes, workProfiles: _work, filterProfiles: _filters, cooking: _cook, weeks: _weeks, gym: _gym, ...baseFields
+    customRecipes: _recipes, workProfiles: _work, filterProfiles: _filters, cooking: _cook,
+    weeks: _weeks, gym: _gym, vegetables: _vegetables, ...baseFields
   } = input;
   const base = parseState(JSON.stringify({ ...baseFields, grocery: groceryBase }), catalogue);
   const gym = input.gym === undefined ? emptyGym() : validateGym(input.gym);
+  const vegetables = input.vegetables === undefined ? emptyVegetables() : validateVegetables(input.vegetables);
   const planIds = new Set(base.plans.filter(plan => plan.sport === 'Krachttraining').map(plan => plan.id));
   for (const session of gym.sessions) if (!planIds.has(session.agenda)) session.agenda = null;
-  return { ...base, customRecipes, workProfiles, filterProfiles, weeks, cooking, gym,
+  return { ...base, customRecipes, workProfiles, filterProfiles, weeks, cooking, gym, vegetables,
     grocery: { ...base.grocery, weekImports }, nextRecipeId: input.nextRecipeId };
 }
 
