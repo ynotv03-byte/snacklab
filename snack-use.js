@@ -115,7 +115,9 @@ function ownUse(recipe, nutrition) {
 }
 
 export function snackUse(recipe, nutrition) {
-  const use = recipe.custom ? ownUse(recipe, nutrition) : standardUse[recipe.id];
+  const use = recipe.footballRecovery ? ['Na voetbal of krachttraining',
+    'De volkoren wrap levert koolhydraten voor je energievoorraad. De vulling levert eiwit voor spierherstel. Een hele wrap kan passen als kleine maaltijd wanneer je na de training trek hebt en je volgende maaltijd op zich laat wachten.',
+    ['protein','carbs','kcal','fat'],'sport'] : recipe.custom ? ownUse(recipe, nutrition) : standardUse[recipe.id];
   if (!use) return null;
   const [moment, explanation, keys, guide] = use;
   return { moment, explanation, keys: keys.filter(key => Number.isFinite(nutrition[key])), source: guides[guide] };

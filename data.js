@@ -1,3 +1,5 @@
+import { recoveryWraps } from './wraps.js';
+
 // IDs komen overeen met de posities in SnackLab 4.1; behoud ze bij wijzigingen.
 export const recipes = [
   {
@@ -1173,7 +1175,8 @@ export const recipes = [
       {"title": "Serveer met kwark en frambozen", "text": "Verdeel de pannenkoekjes over de borden. Schep de kwark erop en verdeel de frambozen erover. Volg bij diepvriesframbozen de bereidingsinstructies op de verpakking."}
     ],
     "image": "./recipe-23.webp"
-  }
+  },
+  ...recoveryWraps
 ];
 
 export const groceryGroups = [
@@ -1181,6 +1184,7 @@ export const groceryGroups = [
   "Zuivel & eieren",
   "Brood & wraps",
   "Vlees & beleg",
+  "Vis & schaaldieren",
   "Voorraadkast",
   "Overig"
 ];

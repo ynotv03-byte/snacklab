@@ -22,7 +22,7 @@ const nav = document.querySelector('nav');
 const toast = document.querySelector('#toast');
 const toastMessage = document.querySelector('#toast-message');
 const toastUndo = document.querySelector('#toast-undo');
-const appVersion = '6.7.0';
+const appVersion = '6.8.0';
 const issues = { read: '', write: '' };
 let db = blankSnapshot();
 const store = openStore();
@@ -87,7 +87,7 @@ const navItems = [
   ['agenda', 'calendar', 'Agenda'], ['profile', 'settings', 'Profiel']
 ];
 const filters = [
-  ['all', 'Alles'], ['quick', 'Binnen 5 min'], ['favorites', 'Favorieten']
+  ['all', 'Alles'], ['quick', 'Binnen 5 min'], ['football', 'Na voetbal'], ['favorites', 'Favorieten']
 ];
 const sorts = [['taste', 'Voor jou'], ['minutes', 'Snelste eerst'], ['protein', 'Meeste eiwit'], ['name', 'Naam A–Z']];
 const dateLong = new Intl.DateTimeFormat('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -378,7 +378,7 @@ function todayActivity(href, symbol, title, detail) {
 
 
 function catalogueView() {
-  return `<div class="page-heading with-action"><h1>Recepten</h1><a class="button" href="#own">${icon('book')} Eigen recepten</a></div>` +
+  return `<div class="page-heading with-action catalogue-heading"><h1>Recepten</h1><a class="button" href="#own">${icon('book')} Eigen recepten</a></div>` +
     `<div class="catalogue-controls">
       <div class="search-box">
         <label for="recipe-search" class="sr-only">Zoek een snack</label>${icon('search')}
@@ -404,6 +404,7 @@ function findRecipes(filter = advancedFilter) {
   return searchRecipes(db, { query: catalogue.query, sort: catalogue.sort })
     .filter(recipe => (!catalogue.filters.has('favorites') || db.favorites.includes(recipe.id))
       && (!catalogue.filters.has('quick') || recipe.minutes <= 5)
+      && (!catalogue.filters.has('football') || recipe.footballRecovery)
       && matchesFilter(recipe, filter, db));
 }
 
@@ -430,13 +431,15 @@ function snackUseCard(recipe, nutrition, n) {
       <h2 id="snack-use-title">Wanneer past deze snack?</h2>
       <h3>${escapeHtml(use.moment)}</h3>
       <p>${escapeHtml(use.explanation)}</p>
+      ${recipe.otherUses ? `<p>${escapeHtml(recipe.otherUses)}</p>` : ''}
+      ${recipe.footballRecovery && recipe.moments.includes('pre') ? '<p class="note">Vóór het sporten kun je een halve wrap proberen als je nog ongeveer twee uur hebt en de vulling goed verdraagt.</p>' : ''}
       ${use.source ? `<a class="snack-use-source" href="${escapeHtml(use.source.url)}" target="_blank" rel="noopener">Voedingscentrum · ${escapeHtml(use.source.label)}</a>` : ''}
     </div>
     ${use.keys.length ? `<div class="snack-use-facts">
       <p>${escapeHtml(factHeading)}</p>
       <ul role="list">${use.keys.map(key => `<li>${key === 'kcal' ? metric(nutrition.kcal, 'kcal') :
         metric(nutrition[key]) + ' ' + nutrientLabels[key]}</li>`).join('')}</ul>
-      ${!recipe.custom && n !== 1 ? '<p class="snack-use-portion-note">De tip gaat uit van 1 portie.</p>' : ''}
+      ${!recipe.custom && !recipe.footballRecovery && n !== 1 ? '<p class="snack-use-portion-note">De tip gaat uit van 1 portie.</p>' : ''}
     </div>` : ''}
   </section>`;
 }
@@ -481,7 +484,7 @@ function recipeView() {
   return `<a href="${escapeHtml(back)}" class="back" data-recipe-back>${icon('back')} ${backLabel}</a>
     <div class="detail-top">${photo(recipe, { priority: true })}
       <div class="detail-copy"><div class="detail-tags"><span class="badge">${cap(recipe.taste)}</span>
-      <span>${icon('clock')} ${recipe.minutes} min</span></div>
+      <span>${icon('clock')} ${recipe.minutes} min</span>${recipe.difficulty ? `<span>${escapeHtml(recipe.difficulty)}</span>` : ''}</div>
       <h1>${escapeHtml(recipe.name)}</h1>${recipe.description ? `<p class="recipe-description">${escapeHtml(recipe.description)}</p>` : ''}${favourite(recipe)}</div></div>
     <div class="recipe-label-status">${labelStatus(recipe,db)}</div>
     ${hazelnutRisk(recipe) ? safety(recipe) : ''}
@@ -507,7 +510,7 @@ function recipeView() {
     ${recipePanel('nutrition',active,`<div class="panel recipe-portion">
       <h2>Voedingswaarden</h2>
       ${portionNutrition(nutrition)}
-      <p class="note">${nutritionNote}${recipe.custom && recipe.nutritionSource === 'estimate' ? ' Berekend met de lokale USDA-bibliotheek.' : ''}</p>
+      <p class="note">${nutritionNote}${recipe.footballRecovery ? ' Geschat zonder toegevoegd bakvet.' : ''}${recipe.custom && recipe.nutritionSource === 'estimate' ? ' Berekend met de lokale USDA-bibliotheek.' : ''}</p>
       ${producePortion(db,recipe,recipeProduce(recipe,n))}
     </div>${snackUseCard(recipe,nutrition,n)}`)}
     ${recipePanel('ingredients',active,`<div class="panel">
@@ -520,6 +523,8 @@ function recipeView() {
       <div class="recipe-allergens">
         <h3>Allergenen</h3>
         <p class="note">${recipe.allergens.length ? 'Op basis van de ingrediënten: ' + escapeHtml(recipe.allergens.join(', ')) + '. ' : 'Geen allergenen opgegeven. '}${allergenNote}</p>
+        ${recipe.footballRecovery ? '<p class="note">Controleer ook de etiketten van je wrap, kruidenmix en zuivel. Samenstelling en waarschuwingen voor sporen kunnen per merk verschillen.</p>' : ''}
+        ${recipe.allergenTip ? `<p class="note">${escapeHtml(recipe.allergenTip)}</p>` : ''}
         ${!hazelnutRisk(recipe) && !recipe.archived ? button(db.allergenReviews[recipe.id] ? 'etiket-wis' : 'etiket-bewaar',
           db.allergenReviews[recipe.id] ? 'Etiketcontrole wissen' : 'Etiketten gecontroleerd', `data-id="${recipe.id}"`, 'text-button') : ''}
         ${recipe.custom ? `<p class="note">${practical(recipe).storage === 'cold' ? 'Koeling nodig. ' : practical(recipe).storage === 'shelf' ? 'Door jou als ongekoeld meeneembaar ingevoerd. ' : 'Koeling onbekend. '}${escapeHtml(practical(recipe).note)}</p>` : ''}
@@ -527,12 +532,15 @@ function recipeView() {
     </div>`)}
     ${recipePanel('preparation',active,`<div class="panel">
       <div class="section-head prep-header"><h2>Bereiding</h2><span class="note">${recipe.steps.length} ${recipe.steps.length === 1 ? 'stap' : 'stappen'}</span></div>
+      ${recipe.flavor ? `<p class="note">${escapeHtml(recipe.temperature)} · ${escapeHtml(recipe.flavor)}</p>` : ''}
+      ${recipe.timingNote ? `<p class="note">${escapeHtml(recipe.timingNote)}</p>` : ''}
       <ol class="recipe-steps">${recipe.steps.map(step => `<li>
         ${step.title ? `<h3>${escapeHtml(step.title)}</h3>` : ''}
         <p>${escapeHtml(step.text)}</p>
         ${step.minutes ? `<small class="step-time">${icon('clock')} ${step.minutes} min timer in kookmodus</small>` : ''}
       </li>`).join('')}</ol>
-      ${recipe.id === 20 ? '<a class="snack-use-source" href="https://www.voedingscentrum.nl/nl/thema/5xveilig/Kip.aspx" target="_blank" rel="noopener">Voedingscentrum · Veilig met kip</a>' : ''}
+      ${recipe.mealPrep ? `<div class="recipe-allergens"><h3>Vooraf klaarmaken</h3><p class="note">${escapeHtml(recipe.mealPrep)}</p></div>` : ''}
+      ${recipe.id === 20 || recipe.foodSafety === 'poultry' ? '<a class="snack-use-source" href="https://www.voedingscentrum.nl/nl/thema/5xveilig/Kip.aspx" target="_blank" rel="noopener">Voedingscentrum · Veilig met kip</a>' : ''}
       <label class="field rating"><span>Jouw beoordeling</span><select id="rating-select">
         ${options([[0, 'Nog te proberen'], ...[1, 2, 3, 4, 5].map(n => [n, n + (n === 1 ? ' ster' : ' sterren')])], db.ratings[recipe.id] ?? 0)}
       </select></label>
@@ -746,16 +754,24 @@ function adviceSection(plan, advice, phase) {
   const storedRecipe = active?.i >= 0 ? byId.get(active.i) : null;
   const selectedSnack = storedRecipe ? { recipe: storedRecipe, i: storedRecipe.id, n: active.n } : null;
   const top = ranked.filter(item => item.i !== selectedSnack?.i);
+  const football = !pre && plan.sport === 'Voetbal';
+  const showWraps = football || pre;
+  const otherWraps = showWraps ? top.slice(3).filter(item => item.recipe.footballRecovery) : [];
+  const otherSnacks = top.slice(3).filter(item => !showWraps || !item.recipe.footballRecovery);
   const skip = foodChoice(plan, phase, { i: -1, n: 0, reason: '' });
   const suggestSkip = active?.i === -1 || (!selectedSnack && (pre ? advice.preOptional : advice.postOptional));
   return `<section class="advice-section"><div class="section-head"><h2>${title}</h2><span class="badge">${formatTime(advice.times[phase])}</span></div>
     <p class="muted advice-note">${text}</p>
+    ${football && advice.demanding && !plan.nextMeal ? '<p class="note">Nog trek na een zware training? Een banaan kan extra koolhydraten leveren. Die zit niet in de voedingswaarden van de wrap.</p>' : ''}
     ${selectedSnack ? foodChoice(plan, phase, { ...selectedSnack, n: active.n, reason: hazelnutRisk(selectedSnack.recipe) ? 'Hazelnoot of mogelijke sporen opgegeven. Kies een ander recept.' : 'Je bewaarde portie.' }) : ''}
     ${suggestSkip ? skip : ''}
     ${top.slice(0, 3).map(item => foodChoice(plan, phase, item)).join('')}
+    ${otherWraps.length ? `<details class="panel more-advice" id="sport-wraps-${plan.id}-${phase}" data-keep-open>
+      <summary>${pre ? 'Wraps ruim vóór het sporten' : 'Herstelwraps na voetbal'} ${icon('down', 'toggle-icon')}</summary>
+      ${otherWraps.map(item => foodChoice(plan, phase, item)).join('')}</details>` : ''}
     <details class="panel more-advice" id="advice-${plan.id}-${phase}" data-keep-open>
       <summary>Meer snackopties ${icon('down', 'toggle-icon')}</summary>
-      ${top.slice(3).map(item => foodChoice(plan, phase, item)).join('')}</details>
+      ${otherSnacks.map(item => foodChoice(plan, phase, item)).join('')}</details>
     ${suggestSkip ? '' : skip}
   </section>`;
 }

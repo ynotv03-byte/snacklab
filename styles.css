@@ -551,6 +551,7 @@ nav {
   .nav-inner a { font-size: clamp(.61rem, 2.75vw, .74rem); }
 }
 @media (max-width: 365px) {
+  .catalogue-heading h1 { font-size: clamp(1.9rem, 9.8vw, 2.3rem); }
   .shell { padding-inline: max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right)); }
   .panel > .section-head { flex-wrap: wrap; }
   .nutrition { grid-template-columns: repeat(3, minmax(0, 1fr)); }

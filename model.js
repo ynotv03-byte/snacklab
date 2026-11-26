@@ -1,6 +1,6 @@
 import {
   builtinMap, byId, newId, sports, nutrientKeys, validDate, validPortions, parseTime,
-  localDate, timing, tasteScore, sportAdvice, hazelnutRisk, scaleNutrition,
+  localDate, timing, tasteScore, sportAdvice, hazelnutRisk, scaleNutrition, supportsSportPhase,
   maxPortions, shoppingIngredient, groceryRows, reconcileChecks, normalizeText
 } from './core.js';
 import { groceryGroups } from './data.js';
@@ -95,6 +95,11 @@ export function catalogueFor(state) {
 export function practical(recipe) {
   if (recipe.custom) return { storage: recipe.storage, portable: recipe.portable, heat: recipe.heat,
     work: recipe.moments.includes('work'), note: recipe.keep, labelsReviewed: recipe.labelsReviewed, checkedHazelnut: recipe.hazelnut === 'checked' };
+  if (recipe.footballRecovery) {
+    const work = recipe.moments.includes('work');
+    return { storage:'cold', portable:work, heat:recipe.temperature === 'Warm', work,
+      note:recipe.mealPrep, labelsReviewed:false, checkedHazelnut:false };
+  }
   return { storage: recipe.id === 5 ? 'shelf' : 'cold', portable: true, heat: false, work: true,
     note: recipe.id === 5 ? 'Neem de banaan heel mee. Bewaar honing en kaneel apart en voeg ze in de pauze toe.' : 'Vervoer gekoeld en volg de bewaarinstructies van de gebruikte producten.',
     labelsReviewed: false, checkedHazelnut: false };
@@ -252,7 +257,7 @@ function candidatesFor(slot, catalogue, prefs, state) {
     .filter(option => option.recipe.minutes <= prefs.minutes)
     .map((option, index) => ({ ...option, rank: Math.max(0, 22 - index * 2) }));
   return all.filter(recipe => recipe.minutes <= prefs.minutes &&
-    (slot.profile ? workEligible(recipe, slot.profile) : slot.kind !== 'pre' || !recipe.custom || recipe.moments.includes('pre')))
+    (slot.profile ? workEligible(recipe, slot.profile) : slot.kind !== 'pre' || (!recipe.footballRecovery && supportsSportPhase(recipe,'pre'))))
     .map(recipe => ({ recipe, n: slot.recurrence ? .5 : 1, rank: 0,
       reason: slot.profile ? practical(recipe).storage === 'shelf' ? 'Mee te nemen volgens het bewaaradvies.' :
         'Mee te nemen als de snack gekoeld blijft.' : slot.recurrence ? 'Kleine suggestie vóór je sport na werk.' : 'Past binnen je voorbereidingstijd.' }));
@@ -469,8 +474,8 @@ export function matchesFilter(recipe, filter, state) {
   if ((filter.favorite && !state.favorites.includes(recipe.id)) || (filter.untried && (state.ratings[recipe.id] || state.cooking[recipe.id]?.complete)) ||
     (filter.positive && !(state.ratings[recipe.id] >= 4)) || (filter.portable && !info.portable) ||
     (filter.own && !recipe.custom) || (filter.work && (!info.work || hazelnutRisk(recipe))) ||
-    (filter.pre && (hazelnutRisk(recipe) || (recipe.custom && !recipe.moments.includes('pre')))) ||
-    (filter.post && (hazelnutRisk(recipe) || (recipe.custom && !recipe.moments.includes('post'))))) return false;
+    (filter.pre && (hazelnutRisk(recipe) || !supportsSportPhase(recipe,'pre'))) ||
+    (filter.post && (hazelnutRisk(recipe) || !supportsSportPhase(recipe,'post')))) return false;
   if ((filter.reviewed || filter.allergens?.length) && !info.labelsReviewed) return false;
   if (filter.allergens?.length) {
     if (filter.allergens.some(allergen => (allergen === 'hazelnoot' || allergen === 'noten') && (!info.checkedHazelnut || hazelnutRisk(recipe)))) return false;

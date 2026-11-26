@@ -12,7 +12,7 @@ export const emptyVegetables = () => ({ heightCm: null, weightKg: null, entries:
 // Voedingscentrum's Schijf van Vijf (https://www.voedingscentrum.nl/adh).
 const pieceWeights = new Map([['komkommer', 400], ['avocado', 180],
   ['banaan', 130], ['bananen', 130], ['appel', 135], ['appels', 135], ['peer', 180], ['peren', 180], ['mandarijn', 60], ['mandarijnen', 60]]);
-const vegetables = new Set(['komkommer','avocado','sla','ijsbergsla','veldsla','romaine','rucola','spinazie','snackwortel',
+const vegetables = new Set(['komkommer','avocado','sla','ijsbergsla','veldsla','romaine','rucola','spinazie','babyspinazie','snackwortel',
   'snackwortels','wortel','wortels','winterpeen','bospeen','tomaat','tomaten','cherrytomaat','cherrytomaten','snoeptomaat',
   'snoeptomaten','paprika','paprikas','puntpaprika','broccoli','bloemkool','courgette','aubergine','champignons',
   'champignon','ui','uien','rode ui','bosui','prei','radijs','biet','rode biet','bietjes','bleekselderij','selderij',
@@ -23,7 +23,7 @@ const fruits = new Set(['appel','appels','banaan','bananen','mango','mangos','aa
   'peer','peren','sinaasappel','sinaasappels','mandarijn','mandarijnen','kiwi','kiwis','ananas','druif','druiven',
   'citroen','citroenen','limoen','limoenen','perzik','perziken','nectarine','nectarines','pruim','pruimen','abrikoos',
   'abrikozen','meloen','watermeloen','galia meloen','grapefruit','papaja','passievrucht','granaatappel','vijg','vijgen']);
-const otherProduce = new Set(['knoflook','peper','gember','aardappel','aardappelen','zoete aardappel','kikkererwten','linzen']);
+const otherProduce = new Set(['knoflook','peper','gember','bieslook','peterselie','aardappel','aardappelen','zoete aardappel','kikkererwten','linzen']);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const range = (value,min,max) => Number.isFinite(value) && value >= min && value <= max;
 const clean = value => typeof value === 'string' ? value.trim().slice(0,110) : '';

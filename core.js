@@ -156,12 +156,13 @@ export function formatQuantity(amount, unit) {
 }
 
 export function formatIngredient(ingredient, portions = 1) {
-  const { product, amount, unit, prep } = ingredient;
+  const { product, amount, unit, prep, gramsPerUnit } = ingredient;
   const name = product === 'eieren' && amount * portions <= 1 ? 'ei' :
     product === 'volkoren wrap' && amount * portions > 1 ? 'volkoren wraps' : product;
   return {
     name: name + (prep ? ' (' + prep + ')' : ''),
-    amount: formatQuantity(amount === null ? null : amount * portions, unit)
+    amount: formatQuantity(amount === null ? null : amount * portions, unit) +
+      (product === 'volkoren wrap' && gramsPerUnit ? ' (' + metric(amount * portions * gramsPerUnit) + ')' : '')
   };
 }
 
@@ -188,6 +189,7 @@ export function groceryRows(list, catalogue = byId) {
       const key = ingredientKey(item);
       const row = result.get(key) ?? { ...item, key, amount: null };
       if (item.amount !== null) row.amount = (row.amount ?? 0) + item.amount * count;
+      if (row.gramsPerUnit !== item.gramsPerUnit) delete row.gramsPerUnit;
       result.set(key, row);
     }
   }
@@ -253,6 +255,8 @@ export function hazelnutRisk(recipe) {
       /hazel[ -]?no(?:ot|ten)|hazelnut/i.test(value));
 }
 
+export const supportsSportPhase = (recipe, phase) => !recipe.moments || recipe.moments.includes(phase);
+
 export function sportAdvice(plan, state, available = recipes) {
   const times = timing(plan);
   const endurance = ['Voetbal', 'Hardlopen', 'Padel', 'Fietsen'].includes(plan.sport);
@@ -265,8 +269,8 @@ export function sportAdvice(plan, state, available = recipes) {
   const postOptional = plan.nextMeal || (!strength && !demanding && plan.duration <= 45);
   const prioritizeProtein = strength || demanding;
   const candidates = available.filter(recipe => !hazelnutRisk(recipe));
-  const pre = candidates.filter(recipe => !recipe.custom || recipe.moments.includes('pre')).map(recipe => {
-    const n = light ? 0.5 : 1;
+  const pre = candidates.filter(recipe => supportsSportPhase(recipe,'pre') && (!recipe.footballRecovery || plan.lead >= 120)).map(recipe => {
+    const n = light || recipe.footballRecovery ? 0.5 : 1;
     const nutrition = scaleNutrition(recipe, n);
     const known = [nutrition.carbs, nutrition.fat, nutrition.fiber].every(Number.isFinite);
     const heavy = light && known && (nutrition.fat > 5 || nutrition.fiber > 3 || (recipe.weight ?? 0) * n > 150);
@@ -275,15 +279,20 @@ export function sportAdvice(plan, state, available = recipes) {
     const score = (heavy ? -50 : 0) + Math.min(nutrition.carbs ?? 0, 30) * 1.1 -
       (nutrition.fat ?? 0) * (light ? 4 : 1.3) - (nutrition.fiber ?? 0) * (light ? 3 : .7) -
       (light ? (recipe.weight ?? 0) * n / 35 : 0) - (known ? 0 : 35);
-    return { recipe, i: recipe.id, n, reason, score: score + tasteScore(recipe, state) * .7 };
+    const wrapReason = 'Halve portie ruim vóór je training. Kies dit als je deze vulling goed verdraagt.';
+    return { recipe, i: recipe.id, n, reason:recipe.footballRecovery ? wrapReason : reason, score: score + tasteScore(recipe, state) * .7 };
   });
-  const post = candidates.filter(recipe => !recipe.custom || recipe.moments.includes('post')).map(recipe => {
+  const post = candidates.filter(recipe => supportsSportPhase(recipe,'post')).map(recipe => {
     const reason = recipe.protein === null ? 'Eiwitgehalte onbekend.' : recipe.protein >= 20 && demanding && recipe.carbs >= 25 ? 'Combineert eiwit met koolhydraten.' :
       recipe.protein >= 20 && prioritizeProtein ? 'Eiwitrijke optie binnen je recepten.' :
         demanding && recipe.carbs >= 25 ? 'Koolhydraatrijke optie binnen je recepten.' : 'Aanvulling op je gewone maaltijden.';
     const score = Math.min(recipe.protein ?? 0, 30) * (prioritizeProtein ? 2 : .4) +
       Math.min(recipe.carbs ?? 0, 40) * (demanding ? 1.35 : .2) - (postOptional ? (recipe.kcal ?? 0) / 28 : 0) - (recipe.protein === null ? 30 : 0);
-    return { recipe, i: recipe.id, n: 1, reason, score: score + tasteScore(recipe, state) * .8 };
+    const footballWrap = plan.sport === 'Voetbal' && recipe.footballRecovery;
+    const fit = footballWrap ? Math.max(0, (16 - recipe.minutes) * .45) +
+      (demanding && !plan.nextMeal ? 4 : 0) - Math.max(0, recipe.kcal - 350) / 35 -
+      Math.max(0, recipe.fat - 8) * (state.sensitive ? .6 : .18) : 0;
+    return { recipe, i: recipe.id, n: 1, reason, score: score + fit + tasteScore(recipe, state) * .8 };
   });
   const best = (a, b) => b.score - a.score || a.i - b.i;
   return { times, long, demanding, strength, light, preOptional, postOptional, pre: pre.sort(best), post: post.sort(best) };
